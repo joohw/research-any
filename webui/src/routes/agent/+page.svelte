@@ -135,10 +135,14 @@
   let historySidebarOpen = false;
   let inputEl: HTMLTextAreaElement | null = null;
   let messagesEl: HTMLDivElement | null = null;
+  /** 流式输出时「thinking」面板的滚动容器，与消息区独立跟踪是否贴底 */
+  let reasoningStreamingEl: HTMLDivElement | null = null;
 
   let scrollIntervalId: ReturnType<typeof setInterval> | null = null;
   let userScrolledUp = false;
+  let reasoningUserScrolledUp = false;
   let scrollCleanup: (() => void) | null = null;
+  let reasoningScrollCleanup: (() => void) | null = null;
 
   $: streaming = $agentStream.streaming;
   $: canUseChat = $agentSessionReady && $agentSessionUserId !== null;
@@ -159,18 +163,40 @@
     };
   }
 
+  $: if (reasoningStreamingEl) {
+    if (reasoningScrollCleanup) reasoningScrollCleanup();
+    const el = reasoningStreamingEl;
+    const onScroll = () => {
+      if (!streaming || !el) return;
+      const { scrollTop, clientHeight, scrollHeight } = el;
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 24;
+      if (!atBottom) reasoningUserScrolledUp = true;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    reasoningScrollCleanup = () => {
+      el.removeEventListener('scroll', onScroll);
+      reasoningScrollCleanup = null;
+    };
+  }
+
   let prevStreaming = false;
   $: {
-    if (streaming && !prevStreaming) userScrolledUp = false;
+    if (streaming && !prevStreaming) {
+      userScrolledUp = false;
+      reasoningUserScrolledUp = false;
+    }
     prevStreaming = streaming;
   }
   $: if (streaming && messagesEl) {
-    const scrollToBottom = () => {
+    void reasoningStreamingEl;
+    const scrollStreamingPanels = () => {
       if (!userScrolledUp && messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+      if (!reasoningUserScrolledUp && reasoningStreamingEl)
+        reasoningStreamingEl.scrollTop = reasoningStreamingEl.scrollHeight;
     };
-    scrollToBottom();
+    scrollStreamingPanels();
     if (scrollIntervalId) clearInterval(scrollIntervalId);
-    scrollIntervalId = setInterval(scrollToBottom, 800);
+    scrollIntervalId = setInterval(scrollStreamingPanels, 800);
   } else if (scrollIntervalId) {
     clearInterval(scrollIntervalId);
     scrollIntervalId = null;
@@ -178,6 +204,7 @@
 
   onDestroy(() => {
     if (scrollCleanup) scrollCleanup();
+    if (reasoningScrollCleanup) reasoningScrollCleanup();
   });
 
   onMount(() => {
@@ -460,7 +487,7 @@
             {#if $agentStream.streamReasoningChain.length > 0}
               <details class="agent-reasoning" open>
                 <summary><span class="agent-reasoning-arrow">▼</span> thinking</summary>
-                <div class="agent-reasoning-inner">
+                <div class="agent-reasoning-inner" bind:this={reasoningStreamingEl}>
                   {#each $agentStream.streamReasoningChain as seg, segIdx (segIdx + (seg.type === 'text' ? seg.text : seg.toolCallId) + (seg.type === 'tool' ? seg.status : ''))}
                     {#if seg.type === 'text'}
                       <div class="agent-reasoning-content">
@@ -1115,15 +1142,17 @@
   }
   :global(.msg-content.markdown-body ul),
   :global(.msg-content.markdown-body ol) {
-    margin: 0.4em 0 0.6em 1.25em;
-    padding: 0;
+    /* outside + 祖先 overflow-x:hidden 会裁掉项目符号；inside 避免黑点与背景「糊在一起」或消失 */
+    margin: 0.4em 0 0.6em 0;
+    padding: 0 0 0 0.25em;
+    list-style-position: inside;
     color: var(--color-foreground);
   }
   :global(.msg-content.markdown-body li) {
     margin-bottom: 0.2em;
   }
   :global(.msg-content.markdown-body li::marker) {
-    color: var(--color-muted-foreground);
+    color: var(--color-muted-foreground-strong);
   }
   :global(.msg-content.markdown-body h1),
   :global(.msg-content.markdown-body h2),

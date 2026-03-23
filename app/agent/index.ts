@@ -4,6 +4,7 @@ import "dotenv/config";
 import { Agent } from "@mariozechner/pi-agent-core";
 import { getModel } from "@mariozechner/pi-ai";
 import { buildFeedAgentTools } from "./tools.js";
+import { USER_SANDBOX_PROFILE_PROMPT } from "./userSandboxProfile.js";
 
 const SYSTEM_PROMPT = `You are an expert research assistant. You help users collect, organize, and answer research questions by querying RSS feeds, searching the web, and fetching page content.
 
@@ -18,7 +19,7 @@ Guidelines:
 - If a tool returns an error (e.g. missing TAVILY_API_KEY), say so plainly and suggest what the user can do.
 
 Documentation:
-- Project architecture and data flow are described in the workspace AGENTS.md. Refer to it when users ask about channels, plugins, sources, or how RSS/enrich/pipeline work.`;
+- Project architecture and data flow are described in the workspace AGENTS.md. Refer to it when users ask about channels, plugins, sources, or how RSS/enrich/pipeline work.${USER_SANDBOX_PROFILE_PROMPT}`;
 
 /** 创建配置好工具的 Agent 实例；传入 userId 时沙箱文件工具写入该用户独立目录 */
 export function createFeedAgent(opts?: { userId?: string }): Agent {
@@ -47,3 +48,4 @@ export function createFeedAgent(opts?: { userId?: string }): Agent {
 }
 
 export { buildFeedAgentTools } from "./tools.js";
+export { ensureUserSandboxProfileFiles, USER_SANDBOX_PROFILE_PROMPT } from "./userSandboxProfile.js";

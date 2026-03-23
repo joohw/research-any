@@ -2,7 +2,7 @@
 
 import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { createFeedAgent } from "../../agent/index.js";
+import { createFeedAgent, ensureUserSandboxProfileFiles } from "../../agent/index.js";
 import { requireAuth } from "../../auth/middleware.js";
 
 type HistoryMessage = {
@@ -92,6 +92,7 @@ export function registerChatRoutes(app: Hono): void {
       const prompt = body?.prompt?.trim();
       if (!prompt) return c.json({ error: "prompt 不能为空" }, 400);
       const userId = c.get("userId") as string;
+      await ensureUserSandboxProfileFiles(userId);
       const agent = createFeedAgent({ userId });
       const history = Array.isArray(body?.messages) ? body.messages : [];
       if (history.length > 0) {
