@@ -17,9 +17,6 @@
   let cooldownTimer: ReturnType<typeof setInterval> | null = null;
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
-  let googleEnabled = false;
-  let githubEnabled = false;
-
   $: nextUrl = $page.url.searchParams.get('next') ?? '/feeds?channel=all';
 
   onMount(async () => {
@@ -33,24 +30,10 @@
       /* stay */
     }
 
-    try {
-      const res = await fetch('/api/auth/providers');
-      if (res.ok) {
-        const data: { google?: boolean; github?: boolean } = await res.json();
-        googleEnabled = data.google ?? false;
-        githubEnabled = data.github ?? false;
-      }
-    } catch {
-      /* ignore */
-    }
-
     const authParam = $page.url.searchParams.get('auth');
     if (authParam === 'error') {
       const msg = $page.url.searchParams.get('msg') ?? '登录失败';
-      error =
-        msg === 'github_no_email'
-          ? 'GitHub 未返回邮箱，请确认账号邮箱为公开状态'
-          : decodeURIComponent(msg);
+      error = decodeURIComponent(msg);
     }
   });
 
@@ -66,10 +49,6 @@
       toast = '';
       toastTimer = null;
     }, duration);
-  }
-
-  function oauthHref(provider: string): string {
-    return `/api/auth/${provider}`;
   }
 
   function startCooldown(seconds = 60) {
@@ -180,17 +159,20 @@
   <title>rssany</title>
   <meta
     name="description"
-    content="rssany：每日几分钟跟进 AI 领域论文、产品与人物动向；邮箱登录即可使用 Feeds、Agent 与订阅管理。"
-  />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
-  <link
-    href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0&display=swap"
-    rel="stylesheet"
+    content="rssany：五分钟消除信息差。产品、论文、人物，你关心的 AI 资讯一网打尽；建议搭配浓缩咖啡。邮箱登录即可使用 Feeds、Agent 与订阅管理。"
   />
 </svelte:head>
 
 <div class="landing">
+  <div class="landing-bg" aria-hidden="true">
+    <div class="landing-bg-base"></div>
+    <div class="landing-bg-mesh"></div>
+    <div class="landing-bg-blob landing-bg-blob--1"></div>
+    <div class="landing-bg-blob landing-bg-blob--2"></div>
+    <div class="landing-bg-blob landing-bg-blob--3"></div>
+    <div class="landing-bg-shimmer"></div>
+    <div class="landing-bg-vignette"></div>
+  </div>
   {#if toast}
     <div class="toast" role="status" aria-live="polite">{toast}</div>
   {/if}
@@ -224,12 +206,8 @@
 
   <main class="main">
     {#if step === 'email'}
-      <h1 class="title">
-        每日几分钟，读懂<span class="title-em">  AI  </span>正在发生什么
-      </h1>
-      <p class="desc">
-        论文、产品、人物与可订阅信息流。用邮箱登录即可使用 Feeds、Agent 与订阅管理。
-      </p>
+      <h1 class="title">每天五分钟，跟上 AI 前沿</h1>
+      <p class="desc">产品、论文、人物，你关心的 AI 资讯，我们帮你一网打尽</p>
 
       {#if error}
         <div class="alert" role="alert">{error}</div>
@@ -252,49 +230,6 @@
       </div>
 
       <a class="browse" href="/feeds?channel=all">先浏览信息流 →</a>
-
-      {#if googleEnabled || githubEnabled}
-        <div class="divider"><span>或使用以下方式登录</span></div>
-        <div class="oauth-row">
-          {#if googleEnabled}
-            <a class="oauth ghost" href={oauthHref('google')}>
-              <svg class="oauth-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  fill="#4285F4"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                />
-              </svg>
-              Google
-            </a>
-          {/if}
-          {#if githubEnabled}
-            <a class="oauth ghost" href={oauthHref('github')}>
-              <svg
-                class="oauth-icon"
-                role="img"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path fill="currentColor" d={siGithub.path} />
-              </svg>
-              GitHub
-            </a>
-          {/if}
-        </div>
-      {/if}
     {:else}
       <h1 class="title title-sm">输入验证码</h1>
       <p class="desc">验证码已发送至 <strong>{email}</strong></p>
@@ -342,22 +277,195 @@
       </div>
     {/if}
   </main>
+
+  <footer class="landing-note">
+    <p class="footnote">note:建议搭配浓缩咖啡</p>
+  </footer>
 </div>
 
 <style>
   .landing {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
     min-height: 100vh;
     width: 100%;
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    background:
-      radial-gradient(ellipse 90% 55% at 50% -15%, rgba(94, 106, 210, 0.28), transparent 55%),
-      radial-gradient(ellipse 70% 40% at 80% 60%, rgba(94, 106, 210, 0.08), transparent 50%),
-      #050508;
+    background: #050508;
     color: #ececed;
     padding: 1.25rem 1.25rem 2.5rem;
     box-sizing: border-box;
+  }
+
+  .landing-bg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .landing-bg-base {
+    position: absolute;
+    inset: 0;
+    background: #050508;
+  }
+
+  .landing-bg-mesh {
+    position: absolute;
+    inset: -15% -10%;
+    background:
+      radial-gradient(ellipse 85% 52% at 50% -8%, rgba(94, 106, 210, 0.3), transparent 58%),
+      radial-gradient(ellipse 65% 42% at 82% 58%, rgba(94, 106, 210, 0.1), transparent 52%),
+      radial-gradient(ellipse 45% 38% at 12% 72%, rgba(94, 106, 210, 0.07), transparent 48%);
+    animation: landing-mesh-drift 22s ease-in-out infinite alternate;
+  }
+
+  .landing-bg-blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(72px);
+    will-change: transform;
+  }
+
+  .landing-bg-blob--1 {
+    width: min(58vw, 440px);
+    height: min(58vw, 440px);
+    top: -12%;
+    left: 18%;
+    background: radial-gradient(
+      circle at 35% 35%,
+      rgba(120, 118, 230, 0.42) 0%,
+      rgba(94, 106, 210, 0.18) 45%,
+      transparent 72%
+    );
+    animation: landing-blob-1 26s ease-in-out infinite;
+  }
+
+  .landing-bg-blob--2 {
+    width: min(48vw, 380px);
+    height: min(48vw, 380px);
+    bottom: 5%;
+    right: -8%;
+    background: radial-gradient(
+      circle at 50% 50%,
+      rgba(94, 106, 210, 0.35) 0%,
+      rgba(70, 82, 180, 0.12) 55%,
+      transparent 70%
+    );
+    animation: landing-blob-2 31s ease-in-out infinite;
+  }
+
+  .landing-bg-blob--3 {
+    width: min(42vw, 320px);
+    height: min(42vw, 320px);
+    top: 42%;
+    left: -12%;
+    background: radial-gradient(
+      circle at 60% 40%,
+      rgba(94, 106, 210, 0.22) 0%,
+      transparent 65%
+    );
+    animation: landing-blob-3 19s ease-in-out infinite;
+  }
+
+  .landing-bg-shimmer {
+    position: absolute;
+    inset: -50% -40%;
+    background: linear-gradient(
+      115deg,
+      transparent 0%,
+      transparent 38%,
+      rgba(94, 106, 210, 0.06) 48%,
+      rgba(148, 152, 240, 0.09) 52%,
+      transparent 62%,
+      transparent 100%
+    );
+    background-size: 200% 200%;
+    animation: landing-shimmer 14s ease-in-out infinite;
+    mix-blend-mode: screen;
+    opacity: 0.85;
+  }
+
+  .landing-bg-vignette {
+    position: absolute;
+    inset: 0;
+    box-shadow: inset 0 0 min(100px, 18vw) rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+  }
+
+  @keyframes landing-mesh-drift {
+    0% {
+      transform: translate(0, 0) scale(1);
+      opacity: 1;
+    }
+    100% {
+      transform: translate(2.5%, 2%) scale(1.04);
+      opacity: 0.92;
+    }
+  }
+
+  @keyframes landing-blob-1 {
+    0%,
+    100% {
+      transform: translate(0, 0) scale(1);
+    }
+    33% {
+      transform: translate(8%, 5%) scale(1.08);
+    }
+    66% {
+      transform: translate(-4%, 10%) scale(0.96);
+    }
+  }
+
+  @keyframes landing-blob-2 {
+    0%,
+    100% {
+      transform: translate(0, 0) rotate(0deg);
+    }
+    50% {
+      transform: translate(-10%, -6%) rotate(8deg) scale(1.06);
+    }
+  }
+
+  @keyframes landing-blob-3 {
+    0%,
+    100% {
+      transform: translate(0, 0);
+      opacity: 0.9;
+    }
+    50% {
+      transform: translate(14%, -8%);
+      opacity: 1;
+    }
+  }
+
+  @keyframes landing-shimmer {
+    0%,
+    100% {
+      background-position: 0% 40%;
+    }
+    50% {
+      background-position: 100% 60%;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .landing-bg-mesh,
+    .landing-bg-blob,
+    .landing-bg-shimmer {
+      animation: none;
+    }
+    .landing-bg-mesh {
+      transform: none;
+    }
+  }
+
+  .landing > :not(.landing-bg) {
+    position: relative;
+    z-index: 1;
   }
 
   .toast {
@@ -451,24 +559,18 @@
   }
 
   .title {
-    font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif;
-    font-size: clamp(2rem, 6vw, 2.75rem);
-    font-weight: 400;
-    line-height: 1.15;
+    font-family: Inter, ui-sans-serif, system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    font-size: clamp(2.125rem, 6.5vw, 3rem);
+    font-weight: 700;
+    line-height: 1.2;
     margin: 0;
     color: #fafafa;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.04em;
   }
 
   .title-sm {
     font-size: clamp(1.75rem, 5vw, 2.25rem);
-  }
-
-  .title-em {
-    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-    font-weight: 700;
-    font-style: normal;
-    letter-spacing: -0.04em;
+    font-weight: 600;
   }
 
   .desc {
@@ -482,6 +584,25 @@
   .desc strong {
     color: #d4d4d8;
     font-weight: 500;
+  }
+
+  .landing-note {
+    flex-shrink: 0;
+    width: 100%;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 1.5rem 1.25rem 0.75rem;
+    text-align: center;
+    box-sizing: border-box;
+  }
+
+  .footnote {
+    margin: 0;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: #6b6f78;
+    font-weight: 400;
+    letter-spacing: 0.02em;
   }
 
   .alert {
@@ -568,61 +689,6 @@
 
   .browse:hover {
     color: #d4d4d8;
-  }
-
-  .divider {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    width: 100%;
-    max-width: 26rem;
-    color: #6b6f78;
-    font-size: 0.75rem;
-    margin-top: 0.25rem;
-  }
-
-  .divider::before,
-  .divider::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: rgba(255, 255, 255, 0.1);
-  }
-
-  .oauth-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.6rem;
-    justify-content: center;
-  }
-
-  .oauth {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.9rem;
-    border-radius: 8px;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    text-decoration: none;
-    transition: background 0.15s ease, border-color 0.15s ease;
-  }
-
-  .oauth.ghost {
-    border: 1px solid rgba(255, 255, 255, 0.22);
-    background: transparent;
-    color: #e4e4e7;
-  }
-
-  .oauth.ghost:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.3);
-  }
-
-  .oauth-icon {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
   }
 
   .code-wrap {

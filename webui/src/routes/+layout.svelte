@@ -90,7 +90,7 @@
       class="agent-me-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label="Research Agent"
+      aria-label="NewsClaw"
     >
       <button
         type="button"

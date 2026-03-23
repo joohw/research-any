@@ -96,7 +96,18 @@
     '找几篇与 RAG 或检索增强相关的文章或讨论',
     '对比 CoT 和 ReAct 在 Agent 任务上的差异与适用场景',
     '搜索「LLM agent」相关的最新进展与论文',
+    'OpenClaw 是什么',
   ];
+
+  const BACKEND_STORAGE_KEY = 'rssany_agent_backend';
+  /** 服务端可用引擎：至少含 rssany；配置 OpenClaw 后多一个 openclaw */
+  let chatBackends: ('rssany' | 'openclaw')[] = ['rssany'];
+  let selectedBackend: 'rssany' | 'openclaw' = 'rssany';
+
+  function backendLabel(id: string): string {
+    if (id === 'openclaw') return 'OpenClaw Gateway';
+    return 'RssAny Agent';
+  }
 
   function toolLabel(name: string): string {
     return TOOL_LABELS[name] ?? name;
@@ -211,6 +222,21 @@
     void (async () => {
       await syncAgentSessionFromApi();
       rehydrateAgentMessages();
+      try {
+        const r = await fetch('/api/chat/options', { credentials: 'include' });
+        if (r.ok) {
+          const j = (await r.json()) as { backends?: ('rssany' | 'openclaw')[] };
+          const list = j.backends?.length ? j.backends : ['rssany'];
+          chatBackends = list as ('rssany' | 'openclaw')[];
+          const saved =
+            typeof localStorage !== 'undefined' ? localStorage.getItem(BACKEND_STORAGE_KEY) : null;
+          if (saved === 'openclaw' || saved === 'rssany') {
+            if (chatBackends.includes(saved)) selectedBackend = saved;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
     })();
     inputEl?.focus();
     const onKeydown = (e: KeyboardEvent) => {
@@ -239,7 +265,7 @@
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, messages: history }),
+        body: JSON.stringify({ prompt, messages: history, backend: selectedBackend }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({})) as { error?: string };
@@ -412,7 +438,31 @@
             <Plus size={18} />
           </button>
         </div>
-        <span class="agent-title">{$currentSession?.title ?? '新对话'}</span>
+        <div class="agent-header-title-wrap">
+          <span class="agent-title">{$currentSession?.title ?? '新对话'}</span>
+          {#if chatBackends.length > 1}
+            <label class="agent-backend-label">
+              <span class="visually-hidden">对话引擎</span>
+              <select
+                class="agent-backend-select"
+                bind:value={selectedBackend}
+                disabled={streaming || !canUseChat}
+                title="选择对话引擎：RssAny 使用本服务 MCP 工具；OpenClaw 走已配置的 Gateway（OpenResponses）"
+                on:change={() => {
+                  try {
+                    localStorage.setItem(BACKEND_STORAGE_KEY, selectedBackend);
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+              >
+                {#each chatBackends as b (b)}
+                  <option value={b}>{backendLabel(b)}</option>
+                {/each}
+              </select>
+            </label>
+          {/if}
+        </div>
       </div>
     </header>
     <div class="agent-messages" bind:this={messagesEl}>
@@ -420,7 +470,7 @@
       {#if $agentMessages.length === 0}
         <div class="agent-empty">
           {#if !$agentSessionReady}
-            <p class="agent-empty-title">Research Agent</p>
+            <p class="agent-empty-title">NewsClaw</p>
             <p class="agent-empty-desc">正在加载会话…</p>
           {:else if !$agentSessionUserId}
             <p class="agent-empty-title">需要登录</p>
@@ -431,10 +481,8 @@
               <a href="/login?next=/feeds" class="agent-empty-login-link">去登录</a>
             </p>
           {:else}
-          <p class="agent-empty-title">Research Agent</p>
-          <p class="agent-empty-desc">
-           从本地频道与订阅 feeds 检索与综览，对比观点、持续追踪主题；需要时联网搜索并抓取网页正文。
-          </p>
+          <p class="agent-empty-title">NewsClaw</p>
+          <p class="agent-empty-desc">一只喜欢收集信源、研究资讯的龙虾。</p>
           <div class="quick-prompts">
             {#each QUICK_PROMPTS as prompt}
               <button type="button" class="quick-prompt" on:click={() => send(prompt)} disabled={streaming || !canUseChat}>{prompt}</button>
@@ -768,9 +816,17 @@
     gap: 0.75rem;
     pointer-events: auto;
   }
-  .agent-title {
+  .agent-header-title-wrap {
     grid-column: 2;
     justify-self: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    max-width: min(28rem, calc(100vw - 9rem));
+  }
+  .agent-title {
     font-size: 0.875rem;
     font-weight: 600;
     color: var(--color-muted-foreground-strong);
@@ -778,8 +834,39 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
-    max-width: min(28rem, calc(100vw - 9rem));
+    width: 100%;
     text-align: center;
+  }
+  .agent-backend-label {
+    display: block;
+    margin: 0;
+  }
+  .agent-backend-select {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-muted-foreground-strong);
+    background: color-mix(in srgb, var(--color-background) 92%, var(--color-foreground) 8%);
+    border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+    border-radius: var(--radius-sm, 6px);
+    padding: 0.2rem 0.45rem;
+    max-width: 100%;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .agent-backend-select:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
   .agent-header-actions {
     grid-column: 1;

@@ -3,6 +3,7 @@
 import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { createFeedAgent, ensureUserSandboxProfileFiles } from "../../agent/index.js";
+import { isOpenClawConfigured, streamOpenClawResponses } from "../../agent/openclawBackend.js";
 import { requireAuth } from "../../auth/middleware.js";
 
 type HistoryMessage = {
@@ -86,15 +87,53 @@ function toAgentMessages(messages: HistoryMessage[]): Array<{ role: string; cont
 }
 
 export function registerChatRoutes(app: Hono): void {
+  app.get("/api/chat/options", requireAuth(), (c) => {
+    const backends: ("rssany" | "openclaw")[] = ["rssany"];
+    if (isOpenClawConfigured()) backends.push("openclaw");
+    return c.json({ backends });
+  });
+
   app.post("/api/chat/stream", requireAuth(), async (c) => {
     try {
-      const body = await c.req.json<{ prompt?: string; messages?: HistoryMessage[] }>();
+      const body = await c.req.json<{
+        prompt?: string;
+        messages?: HistoryMessage[];
+        backend?: "rssany" | "openclaw";
+      }>();
       const prompt = body?.prompt?.trim();
       if (!prompt) return c.json({ error: "prompt 不能为空" }, 400);
       const userId = c.get("userId") as string;
+      const backend = body?.backend === "openclaw" ? "openclaw" : "rssany";
+      if (backend === "openclaw" && !isOpenClawConfigured()) {
+        return c.json({ error: "OpenClaw Gateway 未配置，请设置 OPENCLAW_GATEWAY_URL 与 OPENCLAW_GATEWAY_TOKEN" }, 400);
+      }
+
+      const history = Array.isArray(body?.messages) ? body.messages : [];
+
+      if (backend === "openclaw") {
+        return streamSSE(c, async (stream) => {
+          const send = (event: string, data: unknown) => {
+            stream.writeSSE({ event, data: JSON.stringify(data) }).catch(() => {});
+          };
+          await send("start", {});
+          try {
+            await streamOpenClawResponses({
+              userId,
+              history,
+              prompt,
+              send,
+            });
+          } catch (err) {
+            console.error("[chat/stream] openclaw error:", err);
+            send("error", { message: err instanceof Error ? err.message : String(err) });
+          } finally {
+            stream.close();
+          }
+        });
+      }
+
       await ensureUserSandboxProfileFiles(userId);
       const agent = createFeedAgent({ userId });
-      const history = Array.isArray(body?.messages) ? body.messages : [];
       if (history.length > 0) {
         agent.replaceMessages(toAgentMessages(history) as Parameters<typeof agent.replaceMessages>[0]);
       }
