@@ -1,8 +1,12 @@
 // users 表 CRUD：支持 email/password (local) 与 OAuth (google/github) 两种登录方式
 
 import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
 import { supabase } from "./client.js";
 import { withWriteLock } from "./index.js";
+import { ensureDailySubscriptionsForUser } from "./userDailySubscriptions.js";
+import { SANDBOX_DIR, userAgentSandboxRoot } from "../config/paths.js";
 
 export interface UserRow {
   id: string;
@@ -48,6 +52,12 @@ export async function createUser(data: {
     };
     const { error } = await supabase.from("users").insert(row);
     if (error) throw new Error(`createUser: ${error.message}`);
+    try {
+      await ensureDailySubscriptionsForUser(id);
+    } catch (e) {
+      await supabase.from("users").delete().eq("id", id);
+      throw e instanceof Error ? e : new Error(String(e));
+    }
     return row as UserRow;
   });
 }
@@ -109,6 +119,24 @@ export async function upsertOAuthUser(data: {
 
 export async function updateUserLastLogin(id: string): Promise<void> {
   await supabase.from("users").update({ last_login_at: new Date().toISOString() }).eq("id", id);
+}
+
+/** 删除用户行（子表 ON DELETE CASCADE）；并尽力删除本机沙箱中该用户的目录（不参与 DB 事务） */
+export async function deleteUserAccount(userId: string): Promise<void> {
+  if (!userId.trim()) throw new Error("deleteUserAccount: 无效 userId");
+  await withWriteLock(async () => {
+    const { error, count } = await supabase.from("users").delete({ count: "exact" }).eq("id", userId);
+    if (error) throw new Error(`deleteUserAccount: ${error.message}`);
+    if (count === 0) throw new Error("deleteUserAccount: 用户不存在");
+  });
+  await removeUserSandboxDirs(userId).catch(() => {});
+}
+
+async function removeUserSandboxDirs(userId: string): Promise<void> {
+  const agentRoot = userAgentSandboxRoot(userId);
+  const taskRoot = join(SANDBOX_DIR, "task", userId);
+  await rm(agentRoot, { recursive: true, force: true });
+  await rm(taskRoot, { recursive: true, force: true });
 }
 
 export async function regenerateRssToken(userId: string): Promise<string> {

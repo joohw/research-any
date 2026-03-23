@@ -161,7 +161,7 @@
     background: var(--color-card);
     border: 1px solid var(--color-border);
     border-radius: 12px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+    box-shadow: var(--shadow-panel);
     overflow: hidden;
     animation: slideUp 0.2s ease-out;
   }
@@ -222,8 +222,8 @@
     width: 4px;
   }
   .overlay-body::-webkit-scrollbar-thumb {
-    background: #ddd;
-    border-radius: 2px;
+    background: var(--color-scrollbar-thumb);
+    border-radius: 999px;
   }
 
   .section-title {
@@ -281,11 +281,12 @@
   }
 
   .tag-badge.suggested {
-    background: #fef3c7;
+    background: color-mix(in srgb, #f59e0b 16%, var(--color-muted));
+    color: var(--color-foreground);
   }
   .tag-badge.suggested:hover {
-    background: #fde68a;
-    color: #92400e;
+    background: color-mix(in srgb, #f59e0b 28%, var(--color-muted));
+    color: #fbbf24;
   }
 
   .state {

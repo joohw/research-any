@@ -15,7 +15,7 @@
 - **Real-time push**: New content delivered to the UI via SSE, no polling needed
 - **Auth management**: Puppeteer-based cookie management for login-required sites
 - **Three-stage plugin system**: Source (scrape) → Enrich (full content) → Pipeline (post-processing)
-- **Persistent storage**: SQLite with FTS5 full-text search; incremental upserts with deduplication
+- **Persistent storage**: Supabase (PostgreSQL) with full-text search; incremental upserts with deduplication
 - **MCP server**: Expose your feeds as MCP tools for use in Claude, Cursor, and other AI clients
 
 ## Quick Start
@@ -70,7 +70,7 @@ pnpm start  # API at http://localhost:3751
 
 ## Architecture
 
-Two ingestion paths converge into a shared cache and SQLite database:
+Two ingestion paths converge into a shared cache and Supabase (PostgreSQL):
 
 ```
 Websites / RSS / Email  ──►  Source plugin  ──►  Enrich plugin  ──►  Pipeline  ──►  DB
@@ -80,7 +80,7 @@ External scrapers       ──►  POST /api/gateway/items             ──►
 Consumption:
 
 ```
-Web UI / RSS readers  ◄──  Backend API  ◄──  SQLite
+Web UI / RSS readers  ◄──  Backend API  ◄──  Supabase
                                 │
                            Agent ◄──► Tools ◄──► MCP server
 ```
@@ -199,7 +199,7 @@ Control steps via `.rssany/config.json`:
 │   ├── agent/        AI agent & tool definitions
 │   ├── config/       Paths & global config
 │   ├── core/         Infrastructure (cache, logger, events, LLM)
-│   ├── db/           SQLite layer (FeedItem CRUD, FTS5)
+│   ├── db/           Supabase / PostgreSQL (FeedItem CRUD, search RPCs)
 │   ├── feeder/       RSS generation core
 │   ├── mcp/          MCP server (list_channels / search_feeds / ...)
 │   ├── router/       HTTP routes (Hono)
@@ -214,8 +214,7 @@ Control steps via `.rssany/config.json`:
     ├── channels.json
     ├── tags.json
     ├── plugins/
-    ├── cache/
-    └── data/rssany.db
+    └── cache/
 ```
 
 ## License

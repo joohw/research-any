@@ -2,7 +2,8 @@
 
 import { readFile, stat } from "node:fs/promises";
 import type { Hono } from "hono";
-import { resolveSandboxPath } from "../../../config/paths.js";
+import { resolveUserAgentSandboxPath } from "../../../config/paths.js";
+import { requireAuth } from "../../../auth/middleware.js";
 
 const MAX_BYTES = 2_000_000;
 
@@ -12,12 +13,13 @@ function isMdFile(pathRel: string): boolean {
 }
 
 export function registerSandboxFileRoutes(app: Hono): void {
-  app.get("/api/sandbox-file", async (c) => {
+  app.get("/api/sandbox-file", requireAuth(), async (c) => {
+    const userId = c.get("userId") as string;
     const raw = (c.req.query("rel") ?? "").trim();
     if (!raw) return c.json({ error: "rel 必填" }, 400);
     if (!isMdFile(raw)) return c.json({ error: "仅支持 .md 文件" }, 400);
 
-    const resolved = resolveSandboxPath(raw.replace(/\\/g, "/").replace(/\/+/g, "/").trim() || ".");
+    const resolved = resolveUserAgentSandboxPath(userId, raw.replace(/\\/g, "/").replace(/\/+/g, "/").trim() || ".");
     if ("error" in resolved) return c.json({ error: resolved.error }, 400);
 
     try {

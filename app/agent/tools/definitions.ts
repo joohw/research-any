@@ -66,7 +66,7 @@ function toolTextContent(text: string): [{ type: "text"; text: string }] {
   return [{ type: "text" as const, text }] as [{ type: "text"; text: string }];
 }
 
-const toolDefs: ToolDef[] = [
+const toolDefsWithoutSandbox: ToolDef[] = [
   {
     name: "list_channels",
     label: "List channels",
@@ -106,7 +106,7 @@ const toolDefs: ToolDef[] = [
     params: {
       channel_id: { type: "string", optional: true, description: "Scope to this channel; omit for all channels" },
       source_url: { type: "string", optional: true, description: "Scope to this source URL (single source)" },
-      q: { type: "string", optional: true, description: "Full-text search (title/summary/content, FTS5)" },
+      q: { type: "string", optional: true, description: "Full-text search (title/summary/content)" },
       since: { type: "string", optional: true, description: "Only items after date (YYYY-MM-DD or ISO 8601)" },
       until: { type: "string", optional: true, description: "Only items before date (YYYY-MM-DD or ISO 8601)" },
       tags: { type: "string", optional: true, description: "Comma-separated tags; match any" },
@@ -254,11 +254,14 @@ const toolDefs: ToolDef[] = [
       };
     },
   },
-  {
+];
+
+function makeSandboxToolDef(sandboxUserId: string | undefined): ToolDef {
+  return {
     name: "sandbox",
     label: "Sandbox",
     description:
-      "Read, write, search-replace, or list files under .rssany/sandbox only. Use action: read (path; optional encoding, offset/limit in lines for long files), write (path, content; optional create_dirs), replace (path, old_string, new_string; unique match by default, or replace_all=1), list (optional path default '.', optional recursive=1).",
+      "Read, write, search-replace, or list files in the current user's agent workspace under .rssany/sandbox/agent/<user> (paths are relative to that folder). Requires an authenticated user in chat; MCP calls without user context cannot use this tool. Actions: read (path; optional encoding, offset/limit in lines), write (path, content; optional create_dirs), replace (path, old_string, new_string; unique match by default, or replace_all=1), list (optional path default '.', optional recursive=1).",
     params: {
       action: {
         type: "string",
@@ -311,15 +314,23 @@ const toolDefs: ToolDef[] = [
         isError: true,
       });
 
+      if (!sandboxUserId) {
+        return err("沙箱文件工具需要已登录用户上下文（例如 Web Agent 对话）；MCP 等无用户身份场景无法访问。");
+      }
+      const uid = sandboxUserId;
+
       if (action === "read") {
         const path = a.path?.trim();
         if (!path) return err("read 需要 path");
-        const result = await fn.readFileSandbox({
-          path,
-          encoding: a.encoding,
-          offset: a.offset,
-          limit: a.limit,
-        });
+        const result = await fn.readFileSandbox(
+          {
+            path,
+            encoding: a.encoding,
+            offset: a.offset,
+            limit: a.limit,
+          },
+          uid,
+        );
         if ("error" in result) {
           return {
             content: toolTextContent(JSON.stringify({ error: result.error })),
@@ -337,11 +348,14 @@ const toolDefs: ToolDef[] = [
         const path = a.path?.trim();
         if (!path) return err("write 需要 path");
         if (typeof a.content !== "string") return err("write 需要 content（字符串，可为空）");
-        const result = await fn.writeFileSandbox({
-          path,
-          content: a.content,
-          create_dirs: a.create_dirs !== 0,
-        });
+        const result = await fn.writeFileSandbox(
+          {
+            path,
+            content: a.content,
+            create_dirs: a.create_dirs !== 0,
+          },
+          uid,
+        );
         if ("error" in result) {
           return {
             content: toolTextContent(JSON.stringify({ error: result.error })),
@@ -361,12 +375,15 @@ const toolDefs: ToolDef[] = [
         const oldS = a.old_string;
         if (typeof oldS !== "string" || !oldS.length) return err("replace 需要非空的 old_string");
         const newS = typeof a.new_string === "string" ? a.new_string : "";
-        const result = await fn.replaceInFileSandbox({
-          path,
-          old_string: oldS,
-          new_string: newS,
-          replace_all: a.replace_all,
-        });
+        const result = await fn.replaceInFileSandbox(
+          {
+            path,
+            old_string: oldS,
+            new_string: newS,
+            replace_all: a.replace_all,
+          },
+          uid,
+        );
         if ("error" in result) {
           return {
             content: toolTextContent(JSON.stringify({ error: result.error })),
@@ -382,10 +399,13 @@ const toolDefs: ToolDef[] = [
 
       if (action === "list") {
         const path = a.path?.trim() || ".";
-        const result = await fn.listDirectorySandbox({
-          path,
-          recursive: a.recursive === 1,
-        });
+        const result = await fn.listDirectorySandbox(
+          {
+            path,
+            recursive: a.recursive === 1,
+          },
+          uid,
+        );
         if ("error" in result) {
           return {
             content: toolTextContent(JSON.stringify({ error: result.error })),
@@ -401,11 +421,16 @@ const toolDefs: ToolDef[] = [
 
       return err(`未知 action「${a.action}」，应为 read、write、replace 或 list`);
     },
-  },
-];
+  };
+}
 
-/** 转为 AgentTool[] */
-export function toAgentTools(): AgentTool[] {
+function allToolDefs(sandboxUserId?: string): ToolDef[] {
+  return [...toolDefsWithoutSandbox, makeSandboxToolDef(sandboxUserId)];
+}
+
+/** 转为 AgentTool[]；sandboxUserId 为当前登录用户 id，未提供则沙箱工具会报错 */
+export function toAgentTools(sandboxUserId?: string): AgentTool[] {
+  const toolDefs = allToolDefs(sandboxUserId);
   return toolDefs.map((def) => {
     const parameters = paramsToType(def.params);
     return {
@@ -422,7 +447,7 @@ export function toAgentTools(): AgentTool[] {
 
 /** 注册到 MCP server */
 export function registerMcpTools(server: McpServer): void {
-  for (const def of toolDefs) {
+  for (const def of allToolDefs(undefined)) {
     const zodShape = paramsToZodShape(def.params);
     server.tool(def.name, def.description, zodShape, async (args) => {
       const result = await def.run(args as Record<string, unknown>);

@@ -4,7 +4,8 @@
 import { readdir, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Hono } from "hono";
-import { resolveSandboxPath, SANDBOX_DIR } from "../../../config/paths.js";
+import { resolveUserAgentSandboxPath, userAgentSandboxRoot } from "../../../config/paths.js";
+import { requireAuth } from "../../../auth/middleware.js";
 
 const MAX_SEARCH_MATCHES = 800;
 /** 防止 cache/browser_data 等极大目录或环拖死事件循环 */
@@ -68,10 +69,11 @@ async function collectRecursiveMatches(
 }
 
 export function registerProjectDirsRoutes(app: Hono): void {
-  app.get("/api/project-dirs", async (c) => {
+  app.get("/api/project-dirs", requireAuth(), async (c) => {
+    const userId = c.get("userId") as string;
     const raw = (c.req.query("rel") ?? "").trim();
     const relNorm = raw.replace(/\\/g, "/").replace(/\/+/g, "/").trim() || ".";
-    const resolved = resolveSandboxPath(relNorm);
+    const resolved = resolveUserAgentSandboxPath(userId, relNorm);
     if ("error" in resolved) {
       return c.json({ error: resolved.error }, 400);
     }
@@ -108,7 +110,7 @@ export function registerProjectDirsRoutes(app: Hono): void {
         }
         return c.json({
           path: relDisplay || ".",
-          sandboxRoot: SANDBOX_DIR,
+          sandboxRoot: userAgentSandboxRoot(userId),
           mode: "search" as const,
           q: qRaw,
           truncated,
@@ -134,7 +136,7 @@ export function registerProjectDirsRoutes(app: Hono): void {
       }
       return c.json({
         path: relDisplay || ".",
-        sandboxRoot: SANDBOX_DIR,
+        sandboxRoot: userAgentSandboxRoot(userId),
         entries,
       });
     } catch (e) {

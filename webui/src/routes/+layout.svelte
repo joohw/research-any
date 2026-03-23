@@ -1,162 +1,241 @@
 <script lang="ts">
   /// <reference path="../lucide-svelte.d.ts" />
+  import { browser } from '$app/environment';
   import { page } from '$app/stores';
-  import Rss from 'lucide-svelte/icons/rss';
-  import FolderOpen from 'lucide-svelte/icons/folder-open';
-  import ListTodo from 'lucide-svelte/icons/list-todo';
-  import List from 'lucide-svelte/icons/list';
+  import { onDestroy, onMount } from 'svelte';
   import MessageCircle from 'lucide-svelte/icons/message-circle';
   import Settings from 'lucide-svelte/icons/settings';
-  import '$lib/agentSession';
+  import X from 'lucide-svelte/icons/x';
+  import FeedsNavBar from '$lib/components/FeedsNavBar.svelte';
+  import { agentOverlayOpen } from '$lib/agentOverlay';
+  import AgentPage from './agent/+page.svelte';
+  import { syncAgentSessionFromApi } from '$lib/agentSession';
   import '../app.css';
 
-  interface NavLink { href: string; label: string; Icon: import('svelte').ComponentType }
-  const navLinks: NavLink[] = [
-    { href: '/agent', label: 'Ask', Icon: MessageCircle },
-    { href: '/agent-tasks', label: 'Tasks', Icon: ListTodo },
-    { href: '/feeds?channel=all', label: 'Feeds', Icon: Rss },
-    { href: '/folders', label: 'Folders', Icon: FolderOpen },
-    { href: '/sources', label: 'Sources', Icon: List },
-  ];
+  onMount(() => {
+    if (!browser) return;
+    void syncAgentSessionFromApi();
+  });
 
-  function isActive(link: NavLink, pathname: string): boolean {
-    if (link.href.startsWith('/feeds')) return pathname === '/feeds';
-    if (link.href === '/agent')
-      return pathname === '/agent' || pathname.startsWith('/agent/');
-    if (link.href === '/folders') return pathname.startsWith('/folders');
-    if (link.href === '/agent-tasks') return pathname.startsWith('/agent-tasks');
-    return pathname.startsWith(link.href);
+  $: isFeedsRoute = $page.url.pathname === '/feeds';
+
+  function closeAgentOverlay() {
+    agentOverlayOpen.set(false);
   }
+
+  function toggleAgentOverlay() {
+    agentOverlayOpen.update((o) => !o);
+  }
+
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (!$agentOverlayOpen) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeAgentOverlay();
+    }
+  }
+
+  $: if (browser) {
+    document.documentElement.style.overflow = $agentOverlayOpen ? 'hidden' : '';
+  }
+
+  onDestroy(() => {
+    if (browser) document.documentElement.style.overflow = '';
+  });
+
+  // Home is marketing/login only: no app chrome
+  $: bareHome = $page.url.pathname === '/';
+
 </script>
 
-<div class="layout-outer">
-  <div class="layout-inner">
-    <aside class="sidebar">
-      <nav class="sidebar-nav">
-        {#each navLinks as link}
-          <a
-            href={link.href}
-            class="sidebar-link {isActive(link, $page.url.pathname) ? 'sidebar-link-active' : ''}"
-            title={link.label}
-            aria-label={link.label}
-          >
-            <span class="sidebar-icon"><svelte:component this={link.Icon} size={20} /></span>
-          </a>
-        {/each}
-      </nav>
-      <a href="/admin" class="sidebar-settings" title="设置" aria-label="设置">
-        <span class="sidebar-icon"><Settings size={20} /></span>
-      </a>
-    </aside>
-    <main class="main">
-      <slot />
-    </main>
+<svelte:window on:keydown={onWindowKeydown} />
+
+{#if bareHome}
+  <div class="layout-bare">
+    <slot />
   </div>
-</div>
+{:else}
+  <div class="layout-outer">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <nav class="topbar-left" aria-label="Primary">
+          <button
+            type="button"
+            class="topbar-link {$agentOverlayOpen ? 'topbar-link-active' : ''}"
+            title="Ask"
+            aria-label="Ask"
+            aria-expanded={$agentOverlayOpen}
+            aria-pressed={$agentOverlayOpen}
+            on:click={toggleAgentOverlay}
+          >
+            <span class="topbar-icon"><MessageCircle size={20} /></span>
+          </button>
+        </nav>
+        <div class="topbar-center">
+          <FeedsNavBar />
+        </div>
+        <a href="/me" class="topbar-right" title="Settings" aria-label="Settings">
+          <span class="topbar-icon"><Settings size={20} /></span>
+        </a>
+      </div>
+    </header>
+    <div id="layout-inner-scroll" class="layout-inner">
+      <main class="main" class:main-feeds={isFeedsRoute}>
+        <slot />
+      </main>
+    </div>
+  </div>
+  {#if $agentOverlayOpen}
+    <div
+      class="agent-me-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Research Agent"
+    >
+      <button
+        type="button"
+        class="agent-me-overlay-close"
+        title="关闭"
+        aria-label="关闭"
+        on:click={closeAgentOverlay}
+      >
+        <X size={22} strokeWidth={2} />
+      </button>
+      <div class="agent-me-overlay-body">
+        <AgentPage />
+      </div>
+    </div>
+  {/if}
+{/if}
 
 <style>
-  :global(:root) {
-    --color-primary: #111111;
-    --color-primary-hover: #333333;
-    --color-primary-light: #f0f0f0;
-    --color-primary-foreground: #fff;
-    --color-background: #f5f5f5;
-    --color-foreground: #111;
-    --color-card: #fff;
-    --color-card-foreground: #111;
-    --color-muted: #f3f4f6;
-    --color-muted-foreground: #6b7280;
-    --color-muted-foreground-strong: #374151;
-    --color-muted-foreground-soft: #9ca3af;
-    --color-accent: #eee;
-    --color-accent-foreground: #111;
-    --color-border: #e5e7eb;
-    --color-border-muted: #d1d5db;
-    --color-input: #d1d5db;
-    --color-destructive: #c53030;
-    --color-destructive-foreground: #fff;
-    --color-success: #22c55e;
-    --color-success-foreground: #fff;
+  :global(*, *::before, *::after) {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
   }
-  :global(*, *::before, *::after) { box-sizing: border-box; margin: 0; padding: 0; }
-  :global(body) {
-    font-family: system-ui, -apple-system, sans-serif;
-    background: var(--color-background);
-    color: var(--color-foreground);
-    width: 100%;
-  }
-  /* 仅对无 class 的 button 应用默认样式，带 class 的（含 Tailwind）由各自样式控制 */
+
+  /* Default styles only for buttons with no class; styled buttons (e.g. Tailwind) keep their own */
   :global(button:not([class])),
   :global(button[class='']) {
     font: inherit;
     cursor: pointer;
     padding: 0.35rem 0.75rem;
     border: 1px solid var(--color-input);
-    border-radius: 6px;
-    background: var(--color-background);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--color-card-elevated);
     color: var(--color-foreground);
   }
   :global(button:not([class]):hover:not(:disabled)),
   :global(button[class='']:hover:not(:disabled)) {
     background: var(--color-accent);
-    border-color: var(--color-muted-foreground-soft);
+    border-color: var(--color-border);
   }
   :global(button:not([class]):disabled),
   :global(button[class='']:disabled) {
-    opacity: 0.6;
+    opacity: 0.45;
     cursor: not-allowed;
   }
 
-  /* 外层占满宽，保证内层 mx-auto 能居中 */
-  .layout-outer {
+  .layout-bare {
     width: 100%;
-    min-height: 100vh;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+
+  .layout-outer {
+    --shell-gutter: clamp(0.75rem, 2.5vw, 1.5rem);
+    /* Same max width as main/feeds: fluid with viewport, soft cap for line length */
+    --feeds-column-max: min(960px, calc(100vw - 2 * var(--shell-gutter)));
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .topbar {
+    flex-shrink: 0;
+    width: 100%;
+    z-index: 20;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-background);
+  }
+  .topbar-inner {
+    box-sizing: border-box;
+    width: 100%;
+    display: grid;
+    /* Left: Ask/Tasks | Center: feeds (same max width as main) | Right: settings */
+    grid-template-columns: 1fr minmax(0, var(--feeds-column-max)) 1fr;
+    align-items: start;
+    column-gap: clamp(0.5rem, 2vw, 1rem);
+    padding: 0.65rem var(--shell-gutter);
+  }
+  .topbar-left {
+    display: flex;
+    flex-direction: row;
+    gap: 0.2rem;
+    align-items: center;
+    justify-self: start;
+    justify-content: flex-start;
+    flex-shrink: 0;
+  }
+  .topbar-center {
+    min-width: 0;
+    width: 100%;
+    display: flex;
+    justify-content: flex-start;
+    align-items: flex-start;
+    padding-top: 0.1rem;
   }
   .layout-inner {
     display: flex;
-    min-height: 100vh;
-    max-width: 776px;
-    margin-left: auto;
-    margin-right: auto;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
     width: 100%;
+    padding-top: 0.75rem;
+    padding-inline: var(--shell-gutter);
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior-y: contain;
   }
-  .sidebar {
-    width: 48px;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 0.75rem 0;
-    gap: 0.5rem;
-    z-index: 20;
-    background: var(--color-card);
-    border: 1px solid var(--color-border);
-  }
-  .sidebar-nav {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-    align-items: center;
-  }
-  .sidebar-link {
+  .topbar-link {
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--color-muted-foreground);
     text-decoration: none;
-    padding: 0.5rem;
-    border-radius: 8px;
+    padding: 0.45rem;
+    border-radius: var(--radius-sm, 6px);
+    transition: color 0.12s ease, background 0.12s ease;
   }
-  .sidebar-link:hover {
-    color: var(--color-primary);
+  button.topbar-link {
+    appearance: none;
+    border: none;
+    background: transparent;
+    font: inherit;
+    cursor: pointer;
+  }
+  .topbar-link:hover {
+    color: var(--color-accent-foreground);
     background: var(--color-muted);
   }
-  .sidebar-link-active {
-    color: var(--color-primary);
-    background: var(--color-muted);
+  .topbar-link-active {
+    color: var(--color-primary-foreground);
+    background: var(--color-primary);
   }
-  /* 图标固定尺寸，避免被 Tailwind preflight 或 flex 压缩 */
-  .sidebar-icon {
+  .topbar-link-active:hover {
+    color: var(--color-primary-foreground);
+    background: var(--color-primary-hover);
+  }
+  .topbar-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -164,27 +243,78 @@
     width: 20px;
     height: 20px;
   }
-  .sidebar-icon :global(svg) {
+  .topbar-icon :global(svg) {
     width: 20px;
     height: 20px;
   }
-  .sidebar-settings {
-    margin-top: auto;
+  .topbar-right {
     display: flex;
     align-items: center;
     justify-content: center;
+    justify-self: end;
     color: var(--color-muted-foreground);
     padding: 0.5rem;
     border-radius: 8px;
+    text-decoration: none;
+    flex-shrink: 0;
   }
-  .sidebar-settings:hover {
+  .topbar-right:hover {
     color: var(--color-primary);
     background: var(--color-muted);
   }
   .main {
     flex: 1;
     min-width: 0;
-    min-height: 100vh;
-    max-width: 720px;
+    min-height: 0;
+    width: 100%;
+    max-width: var(--feeds-column-max);
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .main-feeds {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .agent-me-overlay {
+    --shell-gutter: clamp(0.75rem, 2.5vw, 1.5rem);
+    --feeds-column-max: min(960px, calc(100vw - 2 * var(--shell-gutter)));
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--color-background);
+    overflow: hidden;
+  }
+  .agent-me-overlay-close {
+    position: absolute;
+    top: 0.55rem;
+    right: calc(var(--shell-gutter) + 0.15rem);
+    z-index: 120;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm, 6px);
+    background: transparent;
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    transition: color 0.12s ease, background 0.12s ease;
+  }
+  .agent-me-overlay-close:hover {
+    color: var(--color-foreground);
+    background: var(--color-muted);
+  }
+  .agent-me-overlay-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
 </style>

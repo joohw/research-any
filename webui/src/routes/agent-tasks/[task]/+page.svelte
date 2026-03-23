@@ -32,7 +32,7 @@
     try {
       dates = await fetchDates();
       if (dates.length > 0) {
-        goto(`/agent-tasks/${encodeURIComponent(topic)}/${encodeURIComponent(dates[0])}`, { replaceState: true });
+        goto(`/me/daily/${encodeURIComponent(topic)}/${encodeURIComponent(dates[0])}`, { replaceState: true });
         return;
       }
     } catch (e) {
@@ -55,7 +55,7 @@
         generateNotice = taskRes?.result?.message ?? '已生成最新报告';
         if (typeof window !== 'undefined') sessionStorage.removeItem(PENDING_KEY);
         if (dates.length > 0) {
-          goto(`/agent-tasks/${encodeURIComponent(topic)}/${encodeURIComponent(dates[0])}`, { replaceState: true });
+          goto(`/me/daily/${encodeURIComponent(topic)}/${encodeURIComponent(dates[0])}`, { replaceState: true });
         }
         break;
       }
@@ -129,7 +129,7 @@
     <div class="header">
       <div class="header-left">
         <div class="breadcrumb">
-          <a href="/agent-tasks" class="breadcrumb-link">任务</a>
+          <a href="/me" class="breadcrumb-link">任务</a>
           <span class="breadcrumb-sep">/</span>
           <span class="breadcrumb-current">{topic}</span>
         </div>
@@ -164,27 +164,29 @@
 
 <style>
   .wrap {
-    height: 100vh;
-    display: flex;
-    overflow: hidden;
-    max-width: 720px;
+    max-width: var(--feeds-column-max, 720px);
     width: 100%;
     margin: 0 auto;
+    padding-bottom: 4rem;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   .col {
+    position: relative;
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: #fff;
-    border-left: 1px solid #e5e7eb;
-    border-right: 1px solid #e5e7eb;
+    background: transparent;
   }
 
   .header {
-    padding: 0.75rem 1.25rem;
-    border-bottom: 1px solid #f0f0f0;
+    padding: 0.875rem 1.25rem;
+    border-bottom: 1px solid var(--color-border-muted);
     flex-shrink: 0;
   }
 
@@ -207,13 +209,13 @@
   .breadcrumb-sep {
     font-size: 0.9375rem;
     font-weight: 600;
-    color: #9ca3af;
+    color: var(--color-muted-foreground-soft);
     flex-shrink: 0;
   }
   .breadcrumb-current {
     font-size: 0.9375rem;
     font-weight: 600;
-    color: #111;
+    color: var(--color-foreground);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -228,10 +230,7 @@
   .body::-webkit-scrollbar {
     width: 4px;
   }
-  .body::-webkit-scrollbar-thumb {
-    background: #ddd;
-    border-radius: 2px;
-  }
+  .body::-webkit-scrollbar-thumb { background: var(--color-scrollbar-thumb); border-radius: 2px; }
 
   .state {
     display: flex;
@@ -239,7 +238,7 @@
     align-items: center;
     justify-content: center;
     min-height: 200px;
-    color: #888;
+    color: var(--color-muted-foreground);
     font-size: 0.875rem;
     text-align: center;
     gap: 0.4rem;
@@ -248,22 +247,22 @@
     margin: 0;
   }
   .state.error {
-    color: #c53030;
+    color: var(--color-destructive);
   }
   .state.empty .hint {
     font-size: 0.75rem;
-    color: #aaa;
+    color: var(--color-muted-foreground-soft);
   }
   .state.empty .header-actions {
     margin-top: 0.75rem;
   }
   .gen-error {
-    color: #c53030;
+    color: var(--color-destructive);
     font-size: 0.75rem;
     margin-top: 0.5rem;
   }
   .gen-notice {
-    color: #6b7280;
+    color: var(--color-muted-foreground);
     font-size: 0.75rem;
     margin-top: 0.5rem;
   }
@@ -273,7 +272,7 @@
     border-radius: 5px;
     border: 1px solid var(--color-primary);
     background: var(--color-primary);
-    color: #fff;
+    color: var(--color-primary-foreground);
     cursor: pointer;
     transition: background 0.12s;
     white-space: nowrap;
@@ -286,12 +285,5 @@
     cursor: default;
   }
 
-  @media (max-width: 600px) {
-    .wrap {
-      max-width: 100%;
-    }
-    .col {
-      border: none;
-    }
-  }
+  @media (max-width: 600px) { .wrap { max-width: 100%; } }
 </style>

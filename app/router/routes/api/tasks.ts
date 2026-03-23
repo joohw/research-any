@@ -5,6 +5,7 @@ import * as taskStore from "../../../tasks/index.js";
 import * as scheduler from "../../../scheduler/index.js";
 import { CACHE_DIR, TOPIC_TASK_BASE_DIR } from "../../../config/paths.js";
 import { generateDigest } from "../../../topics/index.js";
+import { getOptionalUserId } from "../../../auth/middleware.js";
 import { getItems } from "../../../feeder/index.js";
 import { SOURCES_GROUP } from "../../../scraper/scheduler/index.js";
 import { logger } from "../../../core/logger/index.js";
@@ -30,6 +31,8 @@ export function registerTasksRoutes(app: Hono): void {
       };
       const type = body.type ?? "";
       if (type === "topic-generate" || type === "agent-task-generate") {
+        const userId = await getOptionalUserId(c);
+        if (!userId) return c.json({ error: "未登录或 token 已过期" }, 401);
         const taskKey =
           typeof body.taskKey === "string"
             ? body.taskKey.trim()

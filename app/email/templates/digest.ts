@@ -95,7 +95,7 @@ export function renderDigest(opts: DigestOptions): string {
       <!-- Footer -->
       <tr><td style="background:#f9f9f9;padding:20px 32px;border-top:1px solid #eee;text-align:center;">
         <p style="margin:0;font-size:12px;color:#999;">
-          由 <a href="${escHtml(appUrl)}" style="color:#2563eb;text-decoration:none;">RssAny</a> 自动生成 · <a href="${escHtml(appUrl)}/settings/email-reports" style="color:#999;">管理订阅</a>
+          由 <a href="${escHtml(appUrl)}" style="color:#2563eb;text-decoration:none;">RssAny</a> 自动生成 · <a href="${escHtml(appUrl)}/me" style="color:#999;">账户设置</a>
         </p>
       </td></tr>
 

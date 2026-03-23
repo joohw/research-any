@@ -9,6 +9,7 @@ import { hashPassword, verifyPassword, signToken } from "../../auth/token.js";
 import { requireAuth, AUTH_COOKIE } from "../../auth/middleware.js";
 import {
   createUser,
+  deleteUserAccount,
   getUserByEmail,
   getUserById,
   upsertOAuthUser,
@@ -16,6 +17,8 @@ import {
   regenerateRssToken,
   toPublicUser,
 } from "../../db/users.js";
+import { createOtp, verifyOtp } from "../../auth/otpStore.js";
+import { getEmailSender } from "../../email/sender.js";
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
@@ -64,6 +67,75 @@ export function registerUserAuthRoutes(app: Hono): void {
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "登录失败" }, 500);
     }
+  });
+
+  // --- 邮箱 OTP 登录 ---
+  app.post("/api/auth/otp/send", async (c) => {
+    try {
+      const { email } = await c.req.json<{ email?: string }>();
+      if (!email || !String(email).includes("@")) {
+        return c.json({ error: "请输入有效的邮箱地址" }, 400);
+      }
+      const sender = await getEmailSender();
+      if (!sender) {
+        return c.json(
+          {
+            error:
+              "邮件服务未配置：请在 .env 中配置 SMTP_HOST / SMTP_FROM（或 RESEND_API_KEY），并可选在 .rssany/config.json 的 email 节覆盖 driver/from。",
+          },
+          503
+        );
+      }
+      let code: string;
+      try {
+        code = createOtp(email);
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : "发送过于频繁" }, 429);
+      }
+      const appUrl = getAppUrl();
+      await sender.send({
+        to: email.trim(),
+        subject: "rssany 登录验证码",
+        html: `<p>你的验证码是：<strong style="font-size:1.25em;letter-spacing:0.15em">${code}</strong></p><p>10 分钟内有效。如非本人操作，请忽略。</p><p style="color:#888;font-size:12px">${appUrl}</p>`,
+        text: `你的验证码是：${code}（10 分钟内有效）。如非本人操作请忽略。`,
+      });
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "发送失败" }, 500);
+    }
+  });
+
+  app.post("/api/auth/otp/verify", async (c) => {
+    try {
+      const { email, code } = await c.req.json<{ email?: string; code?: string }>();
+      if (!email || !code) return c.json({ error: "email 和 code 不能为空" }, 400);
+      if (!verifyOtp(email, code)) return c.json({ error: "验证码错误或已过期" }, 401);
+
+      let user = await getUserByEmail(email);
+      if (!user) {
+        user = await createUser({
+          email,
+          passwordHash: null,
+          provider: "email",
+          providerId: email.toLowerCase().trim(),
+        });
+      } else {
+        await updateUserLastLogin(user.id);
+      }
+      const token = await signToken(user.id);
+      setCookie(c, AUTH_COOKIE, token, COOKIE_OPTIONS);
+      return c.json({ user: toPublicUser(user) });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "验证失败" }, 500);
+    }
+  });
+
+  // --- OAuth 是否可用（首页等根据此展示 Google/GitHub 按钮）---
+  app.get("/api/auth/providers", (c) => {
+    return c.json({
+      google: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+      github: Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),
+    });
   });
 
   // --- Google OAuth ---
@@ -139,6 +211,20 @@ export function registerUserAuthRoutes(app: Hono): void {
     const userId = c.get("userId") as string;
     const newToken = await regenerateRssToken(userId);
     return c.json({ rssToken: newToken });
+  });
+
+  // --- 销号：删除当前用户（DB 级联子表）并清除登录 Cookie ---
+  app.delete("/api/auth/account", requireAuth(), async (c) => {
+    const userId = c.get("userId") as string;
+    try {
+      await deleteUserAccount(userId);
+      deleteCookie(c, AUTH_COOKIE, { path: "/" });
+      return c.json({ ok: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("用户不存在")) return c.json({ error: msg }, 404);
+      return c.json({ error: msg }, 500);
+    }
   });
 
   // --- 登出 ---

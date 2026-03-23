@@ -1,90 +1,127 @@
-// 话题报告调度：每个 topic 独立调度（与 sources 类似），复用通用调度器
-// 使用 cron 表达式，固定每天 4 点执行，与服务器启动时间解耦
+// 话题报告调度：每个系统日报两条 cron — 提前生成 Markdown → 固定时刻发邮件
+// node-cron：分 时 日 月 周，本地时区
 
-import { watch } from "node:fs";
 import * as scheduler from "../scheduler/index.js";
 import { generateTopicDigest } from "./index.js";
-import { getAgentTasks } from "../db/index.js";
-import { TASKS_CONFIG_PATH } from "../config/paths.js";
+import { sendDailyDigestEmailsForTopic } from "./dailyDigestMail.js";
+import { hasAnyEnabledSubscriberForDailyKey } from "../db/index.js";
+import { loadDailyReports } from "../config/loadDailyReports.js";
 import { logger } from "../core/logger/index.js";
 
+let cachedTopicBaseDir: string | null = null;
 
 const TOPICS_GROUP = "topics";
 /** Agent 任务组最大并发数 */
 const TOPICS_CONCURRENCY = 1;
-/** 默认执行时刻（小时，0–23），本地时间 */
-const DEFAULT_SCHEDULE_HOUR = 4;
 
+/** 生成日报：默认每天 5:30（本地时间），早于发送以便模型跑完 */
+const DIGEST_GENERATE_HOUR = Number(process.env.DAILY_DIGEST_GENERATE_HOUR ?? 5);
+const DIGEST_GENERATE_MINUTE = Number(process.env.DAILY_DIGEST_GENERATE_MINUTE ?? 30);
 
-function topicTaskId(title: string): string {
-  return `topic:${title}`;
+/** 发送邮件：默认每天 6:00（本地时间） */
+const DIGEST_SEND_HOUR = Number(process.env.DAILY_DIGEST_SEND_HOUR ?? 6);
+const DIGEST_SEND_MINUTE = Number(process.env.DAILY_DIGEST_SEND_MINUTE ?? 0);
+
+function topicGenTaskId(dailyKey: string): string {
+  return `topic:gen:${dailyKey}`;
 }
 
+function topicSendTaskId(dailyKey: string): string {
+  return `topic:send:${dailyKey}`;
+}
 
-function createTopicTask(baseDir: string, topicTitle: string): scheduler.ScheduledTask {
+function createGenerateTask(baseDir: string, topicTitle: string): scheduler.ScheduledTask {
   return async () => {
     await generateTopicDigest(baseDir, topicTitle, false);
   };
 }
 
+function createSendTask(topicTitle: string, dailyKey: string): scheduler.ScheduledTask {
+  return async () => {
+    const any = await hasAnyEnabledSubscriberForDailyKey(dailyKey);
+    if (!any) {
+      logger.debug("scheduler", "该日报无订阅者，跳过邮件", { dailyKey, topicTitle });
+      return;
+    }
+    await sendDailyDigestEmailsForTopic(topicTitle, dailyKey);
+  };
+}
 
 /**
- * 将 refresh 天数转为 cron 表达式（本地时间）
- * refresh 1 → 每天 4:00；7 → 每周日 4:00；其他 → 每月每隔 N 天 4:00（如 3 → 1,4,7,10...）
+ * 将 refresh 天数转为 cron（本地时间，同一 hour/minute）
+ * refresh 1 → 每天；7 → 每周日；其他 → 月内按步长
  */
-function refreshDaysToCron(refreshDays: number, hour: number): string {
+function refreshDaysToCron(refreshDays: number, hour: number, minute: number): string {
   const h = Math.max(0, Math.min(23, hour));
-  const m = "0";
+  const min = Math.max(0, Math.min(59, minute));
+  const m = String(min);
   if (refreshDays === 1) return `${m} ${h} * * *`;
   if (refreshDays === 7) return `${m} ${h} * * 0`;
   const n = Math.min(31, Math.max(2, refreshDays));
   return `${m} ${h} 1-31/${n} * *`;
 }
 
-
-/** 读取 tasks.json 并为每个任务注册独立定时调度（cron，本地时间） */
+/** 每个系统日报：注册「生成」与「发邮件」两条 cron；生成始终执行，发邮件前仍检查是否有订阅者 */
 async function rescheduleTopics(baseDir: string, runNow: boolean): Promise<void> {
   scheduler.unscheduleGroup(TOPICS_GROUP);
 
-  let topics: Awaited<ReturnType<typeof getAgentTasks>>;
+  let defs: Awaited<ReturnType<typeof loadDailyReports>>;
   try {
-    topics = await getAgentTasks();
+    defs = await loadDailyReports();
   } catch {
-    topics = [];
+    defs = [];
   }
 
-  for (const t of topics) {
-    const title = t.title.trim();
+  let registered = 0;
+  for (const def of defs) {
+    const title = def.title.trim();
     if (!title) continue;
-    const refreshDays = Math.max(1, t.refresh ?? 1);
-    const cronExpr = refreshDaysToCron(refreshDays, DEFAULT_SCHEDULE_HOUR);
+    const refreshDays = Math.max(1, def.refresh);
+    const cronGen = refreshDaysToCron(refreshDays, DIGEST_GENERATE_HOUR, DIGEST_GENERATE_MINUTE);
+    const cronSend = refreshDaysToCron(refreshDays, DIGEST_SEND_HOUR, DIGEST_SEND_MINUTE);
 
-    scheduler.schedule(TOPICS_GROUP, topicTaskId(title), createTopicTask(baseDir, title), {
-      cron: cronExpr,
-      retries: 1,
-      retryDelayMs: 60_000,
-      concurrency: TOPICS_CONCURRENCY,
-      runNow,
-    });
+    scheduler.schedule(
+      TOPICS_GROUP,
+      topicGenTaskId(def.key),
+      createGenerateTask(baseDir, title),
+      {
+        cron: cronGen,
+        retries: 1,
+        retryDelayMs: 60_000,
+        concurrency: TOPICS_CONCURRENCY,
+        runNow,
+      }
+    );
+    scheduler.schedule(
+      TOPICS_GROUP,
+      topicSendTaskId(def.key),
+      createSendTask(title, def.key),
+      {
+        cron: cronSend,
+        retries: 1,
+        retryDelayMs: 60_000,
+        concurrency: TOPICS_CONCURRENCY,
+        runNow: false,
+      }
+    );
+    registered += 2;
   }
 
-  logger.info("scheduler", "Agent 任务调度已注册", { count: topics.length });
+  logger.info("scheduler", "Agent 日报调度已注册（生成→邮件）", {
+    taskPairs: registered / 2,
+    defs: defs.length,
+    generateAt: `${DIGEST_GENERATE_HOUR}:${String(DIGEST_GENERATE_MINUTE).padStart(2, "0")}`,
+    sendAt: `${DIGEST_SEND_HOUR}:${String(DIGEST_SEND_MINUTE).padStart(2, "0")}`,
+  });
 }
 
-
 export async function initTopicsScheduler(baseDir: string): Promise<void> {
+  cachedTopicBaseDir = baseDir;
   await rescheduleTopics(baseDir, false);
+}
 
-  let debounceTimer: NodeJS.Timeout | null = null;
-  try {
-    const watcher = watch(TASKS_CONFIG_PATH, () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        rescheduleTopics(baseDir, true).catch(() => {});
-      }, 500);
-    });
-    watcher.on("error", () => {});
-  } catch {
-    // tasks.json 尚不存在，跳过文件监听
-  }
+/** 订阅开关变更后重新注册 cron（如 PUT /api/daily-reports 保存后调用） */
+export async function refreshTopicsScheduler(): Promise<void> {
+  if (!cachedTopicBaseDir) return;
+  await rescheduleTopics(cachedTopicBaseDir, true);
 }

@@ -105,7 +105,7 @@
   }
 
   function openArticle(date: string) {
-    goto(`/agent-tasks/${encodeURIComponent(topic)}/${encodeURIComponent(date)}`);
+    goto(`/me/daily/${encodeURIComponent(topic)}/${encodeURIComponent(date)}`);
   }
 
   onMount(() => {
@@ -126,9 +126,9 @@
     <div class="header">
       <div class="header-left">
         <div class="breadcrumb">
-          <a href="/agent-tasks" class="breadcrumb-link">任务</a>
+          <a href="/me" class="breadcrumb-link">任务</a>
           <span class="breadcrumb-sep">/</span>
-          <a href="/agent-tasks/{encodeURIComponent(topic)}" class="breadcrumb-link">{topic}</a>
+          <a href="/me/daily/{encodeURIComponent(topic)}" class="breadcrumb-link">{topic}</a>
           <span class="breadcrumb-sep">/</span>
           <span class="breadcrumb-current">报告列表</span>
         </div>
@@ -167,7 +167,7 @@
           {#each dates as date (date)}
             <li>
               <a
-                href="/agent-tasks/{encodeURIComponent(topic)}/{encodeURIComponent(date)}"
+                href="/me/daily/{encodeURIComponent(topic)}/{encodeURIComponent(date)}"
                 class="article-link"
                 on:click|preventDefault={() => openArticle(date)}
               >
@@ -184,27 +184,29 @@
 
 <style>
   .wrap {
-    height: 100vh;
-    display: flex;
-    overflow: hidden;
-    max-width: 720px;
+    max-width: var(--feeds-column-max, 720px);
     width: 100%;
     margin: 0 auto;
+    padding-bottom: 4rem;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   .col {
+    position: relative;
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: #fff;
-    border-left: 1px solid #e5e7eb;
-    border-right: 1px solid #e5e7eb;
+    background: transparent;
   }
 
   .header {
-    padding: 0.75rem 1.25rem;
-    border-bottom: 1px solid #f0f0f0;
+    padding: 0.875rem 1.25rem;
+    border-bottom: 1px solid var(--color-border-muted);
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -236,13 +238,13 @@
   .breadcrumb-sep {
     font-size: 0.9375rem;
     font-weight: 600;
-    color: #9ca3af;
+    color: var(--color-muted-foreground-soft);
     flex-shrink: 0;
   }
   .breadcrumb-current {
     font-size: 0.9375rem;
     font-weight: 600;
-    color: #111;
+    color: var(--color-foreground);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -281,10 +283,7 @@
   .body::-webkit-scrollbar {
     width: 4px;
   }
-  .body::-webkit-scrollbar-thumb {
-    background: #ddd;
-    border-radius: 2px;
-  }
+  .body::-webkit-scrollbar-thumb { background: var(--color-scrollbar-thumb); border-radius: 2px; }
 
   .state {
     display: flex;
@@ -292,7 +291,7 @@
     align-items: center;
     justify-content: center;
     min-height: 200px;
-    color: #888;
+    color: var(--color-muted-foreground);
     font-size: 0.875rem;
     text-align: center;
     gap: 0.4rem;
@@ -301,37 +300,37 @@
     margin: 0;
   }
   .state.error {
-    color: #c53030;
+    color: var(--color-destructive);
   }
   .state.empty .hint {
     font-size: 0.75rem;
-    color: #aaa;
+    color: var(--color-muted-foreground-soft);
   }
   .gen-error {
-    color: #c53030;
+    color: var(--color-destructive);
     font-size: 0.75rem;
     margin-top: 0.5rem;
   }
   .gen-notice {
-    color: #6b7280;
+    color: var(--color-muted-foreground);
     font-size: 0.75rem;
     margin-top: 0.5rem;
   }
   .gen-notice-bar {
-    background: #f8fafc;
-    border: 1px solid #e5e7eb;
+    background: var(--color-card-elevated);
+    border: 1px solid var(--color-border);
     border-radius: 4px;
     padding: 0.5rem 0.75rem;
-    color: #4b5563;
+    color: var(--color-muted-foreground-strong);
     font-size: 0.8125rem;
     margin-bottom: 1rem;
   }
   .gen-error-bar {
-    background: #fff5f5;
-    border: 1px solid #fed7d7;
+    background: color-mix(in srgb, var(--color-destructive) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-destructive) 35%, transparent);
     border-radius: 4px;
     padding: 0.5rem 0.75rem;
-    color: #c53030;
+    color: var(--color-destructive);
     font-size: 0.8125rem;
     margin-bottom: 1rem;
   }
@@ -345,7 +344,7 @@
     gap: 0;
   }
   .article-list li {
-    border-bottom: 1px solid #e5e7eb;
+    border-bottom: 1px solid var(--color-border-muted);
   }
   .article-list li:last-child {
     border-bottom: none;
@@ -365,27 +364,20 @@
     padding-right: 0.5rem;
   }
   .article-link:hover {
-    background: #fafafa;
+    background: var(--color-muted);
   }
   .article-date {
     font-size: 0.9375rem;
     font-weight: 500;
-    color: #111;
+    color: var(--color-foreground);
   }
   .article-link:hover .article-date {
     color: var(--color-primary);
   }
   .article-label {
     font-size: 0.75rem;
-    color: #9ca3af;
+    color: var(--color-muted-foreground-soft);
   }
 
-  @media (max-width: 600px) {
-    .wrap {
-      max-width: 100%;
-    }
-    .col {
-      border: none;
-    }
-  }
+  @media (max-width: 600px) { .wrap { max-width: 100%; } }
 </style>

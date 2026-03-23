@@ -95,24 +95,31 @@ export function createEmailSender(config: EmailConfig): EmailSender {
   }
 }
 
-/** 获取全局 EmailSender 单例；driver/from 读自 config.json 或 env */
+/** 获取全局 EmailSender 单例；driver/from 读自 config.json（若存在）并可用 env 覆盖；无 config 时仅用 env */
 export async function getEmailSender(): Promise<EmailSender | null> {
   if (_sender) return _sender;
+
+  let driver: EmailConfig["driver"] | null = null;
+  let from = "";
+
   try {
     const { readFile } = await import("node:fs/promises");
     const { CONFIG_PATH } = await import("../config/paths.js");
     const raw = await readFile(CONFIG_PATH, "utf-8");
     const config = JSON.parse(raw) as { email?: Partial<EmailConfig> };
-
-    const driver = (config.email?.driver ?? (process.env.SMTP_HOST ? "smtp" : process.env.RESEND_API_KEY ? "resend" : null)) as EmailConfig["driver"] | null;
-    if (!driver) return null;
-
-    const from = config.email?.from ?? process.env.SMTP_FROM ?? "";
-    _sender = createEmailSender({ driver, from });
-    return _sender;
+    driver = (config.email?.driver ??
+      (process.env.SMTP_HOST ? "smtp" : process.env.RESEND_API_KEY ? "resend" : null)) as EmailConfig["driver"] | null;
+    from = config.email?.from ?? process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "";
   } catch {
-    return null;
+    driver = (process.env.SMTP_HOST ? "smtp" : process.env.RESEND_API_KEY ? "resend" : null) as EmailConfig["driver"] | null;
+    from = process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "";
   }
+
+  if (!driver) return null;
+  if (!from.trim()) return null;
+
+  _sender = createEmailSender({ driver, from });
+  return _sender;
 }
 
 /** 重置单例（config 更新后调用） */

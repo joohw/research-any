@@ -166,9 +166,9 @@
     <div class="header">
       <div class="header-left">
         <div class="breadcrumb">
-          <a href="/agent-tasks" class="breadcrumb-link">任务</a>
+          <a href="/me" class="breadcrumb-link">任务</a>
           <span class="breadcrumb-sep">/</span>
-          <a href="/agent-tasks/{encodeURIComponent(topic)}/list" class="breadcrumb-link">{topic}</a>
+          <a href="/me/daily/{encodeURIComponent(topic)}/list" class="breadcrumb-link">{topic}</a>
           <span class="breadcrumb-sep">/</span>
           <span class="breadcrumb-current">{dateParam}</span>
         </div>
@@ -176,7 +176,7 @@
           <div class="nav-bar">
             {#if prevDate}
               <a
-                href="/agent-tasks/{encodeURIComponent(topic)}/{encodeURIComponent(prevDate)}"
+                href="/me/daily/{encodeURIComponent(topic)}/{encodeURIComponent(prevDate)}"
                 class="nav-btn"
                 title="上一篇"
               >上一篇</a>
@@ -185,7 +185,7 @@
             {/if}
             {#if nextDate}
               <a
-                href="/agent-tasks/{encodeURIComponent(topic)}/{encodeURIComponent(nextDate)}"
+                href="/me/daily/{encodeURIComponent(topic)}/{encodeURIComponent(nextDate)}"
                 class="nav-btn"
                 title="下一篇"
               >下一篇</a>
@@ -210,7 +210,7 @@
       {:else if !content}
         <div class="state empty">
           <p>该日报告不存在</p>
-          <a href="/agent-tasks/{encodeURIComponent(topic)}/list">返回 {topic} 报告列表</a>
+          <a href="/me/daily/{encodeURIComponent(topic)}/list">返回 {topic} 报告列表</a>
           {#if generateNotice}
             <p class="gen-notice">{generateNotice}</p>
           {/if}
@@ -235,27 +235,29 @@
 
 <style>
   .wrap {
-    height: 100vh;
-    display: flex;
-    overflow: hidden;
-    max-width: 720px;
+    max-width: var(--feeds-column-max, 720px);
     width: 100%;
     margin: 0 auto;
+    padding-bottom: 4rem;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   .col {
+    position: relative;
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: #fff;
-    border-left: 1px solid #e5e7eb;
-    border-right: 1px solid #e5e7eb;
+    background: transparent;
   }
 
   .header {
-    padding: 0.75rem 1.25rem;
-    border-bottom: 1px solid #f0f0f0;
+    padding: 0.875rem 1.25rem;
+    border-bottom: 1px solid var(--color-border-muted);
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -291,13 +293,13 @@
   .breadcrumb-sep {
     font-size: 0.9375rem;
     font-weight: 600;
-    color: #9ca3af;
+    color: var(--color-muted-foreground-soft);
     flex-shrink: 0;
   }
   .breadcrumb-current {
     font-size: 0.9375rem;
     font-weight: 600;
-    color: #111;
+    color: var(--color-foreground);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -312,17 +314,17 @@
   .nav-btn {
     padding: 0.25rem 0.5rem;
     font-size: 0.8125rem;
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--color-border);
     border-radius: 4px;
-    background: #fff;
-    color: #6b7280;
+    background: var(--color-card-elevated);
+    color: var(--color-muted-foreground);
     cursor: pointer;
     text-decoration: none;
   }
   .nav-btn:hover:not(.disabled) {
-    background: #f5f5f5;
-    border-color: #d1d5db;
-    color: #111;
+    background: var(--color-muted);
+    border-color: var(--color-border);
+    color: var(--color-foreground);
   }
   .nav-btn.disabled {
     opacity: 0.4;
@@ -337,7 +339,7 @@
     border-radius: 5px;
     border: 1px solid var(--color-primary);
     background: var(--color-primary);
-    color: #fff;
+    color: var(--color-primary-foreground);
     cursor: pointer;
     transition: background 0.12s;
     white-space: nowrap;
@@ -351,7 +353,7 @@
     padding: 1.5rem 1.25rem;
   }
   .body::-webkit-scrollbar { width: 4px; }
-  .body::-webkit-scrollbar-thumb { background: #ddd; border-radius: 2px; }
+  .body::-webkit-scrollbar-thumb { background: var(--color-scrollbar-thumb); border-radius: 2px; }
 
   .state {
     display: flex;
@@ -360,32 +362,32 @@
     justify-content: center;
     height: 100%;
     min-height: 200px;
-    color: #888;
+    color: var(--color-muted-foreground);
     font-size: 0.875rem;
     text-align: center;
     gap: 0.4rem;
   }
   .state p { margin: 0; }
   .state a { color: var(--color-primary); }
-  .state.error { color: #c53030; }
+  .state.error { color: var(--color-destructive); }
 
-  .gen-error { color: #c53030; font-size: 0.75rem; margin-top: 0.5rem; }
-  .gen-notice { color: #6b7280; font-size: 0.75rem; margin-top: 0.5rem; }
+  .gen-error { color: var(--color-destructive); font-size: 0.75rem; margin-top: 0.5rem; }
+  .gen-notice { color: var(--color-muted-foreground); font-size: 0.75rem; margin-top: 0.5rem; }
   .gen-notice-bar {
-    background: #f8fafc;
-    border: 1px solid #e5e7eb;
+    background: var(--color-card-elevated);
+    border: 1px solid var(--color-border);
     border-radius: 4px;
     padding: 0.5rem 0.75rem;
-    color: #4b5563;
+    color: var(--color-muted-foreground-strong);
     font-size: 0.8125rem;
     margin-bottom: 1rem;
   }
   .gen-error-bar {
-    background: #fff5f5;
-    border: 1px solid #fed7d7;
+    background: color-mix(in srgb, var(--color-destructive) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-destructive) 35%, transparent);
     border-radius: 4px;
     padding: 0.5rem 0.75rem;
-    color: #c53030;
+    color: var(--color-destructive);
     font-size: 0.8125rem;
     margin-bottom: 1rem;
   }
@@ -393,84 +395,139 @@
   .markdown-body {
     font-size: 0.9rem;
     line-height: 1.75;
-    color: #1a1a1a;
+    color: var(--color-foreground);
   }
   .markdown-body :global(h1) {
     font-size: 1.25rem;
     font-weight: 700;
     margin: 0 0 0.25rem;
-    color: #111;
+    color: var(--color-foreground);
   }
   .markdown-body :global(h2) {
     font-size: 1.05rem;
     font-weight: 600;
     margin: 1.75rem 0 0.5rem;
-    color: #111;
-    border-bottom: 1px solid #f0f0f0;
+    color: var(--color-foreground);
+    border-bottom: 1px solid var(--color-border-muted);
     padding-bottom: 0.25rem;
   }
   .markdown-body :global(h3) {
     font-size: 0.9375rem;
     font-weight: 600;
     margin: 1.25rem 0 0.4rem;
-    color: #333;
+    color: var(--color-muted-foreground-strong);
   }
   .markdown-body :global(p) {
     margin: 0.6rem 0;
-    color: #444;
+    color: var(--color-muted-foreground-strong);
   }
   .markdown-body :global(blockquote) {
     margin: 0.75rem 0;
-    padding: 0.25rem 0.875rem;
-    border-left: 3px solid #e5e7eb;
-    color: #888;
+    padding: 0.35rem 0.875rem;
+    border-left: 3px solid var(--color-primary);
+    color: var(--color-muted-foreground);
     font-size: 0.8125rem;
+    background: color-mix(in srgb, var(--color-card-elevated) 80%, transparent);
+    border-radius: 0 var(--radius-sm, 6px) var(--radius-sm, 6px) 0;
   }
   .markdown-body :global(ul), .markdown-body :global(ol) {
     margin: 0.5rem 0;
     padding-left: 1.5rem;
+    color: var(--color-muted-foreground-strong);
   }
   .markdown-body :global(li) {
     margin: 0.25rem 0;
-    color: #444;
+    color: var(--color-muted-foreground-strong);
   }
-  .markdown-body :global(strong) { color: #111; }
-  .markdown-body :global(a) { color: var(--color-primary); text-decoration: none; }
-  .markdown-body :global(a:hover) { text-decoration: underline; }
+  .markdown-body :global(li::marker) {
+    color: var(--color-muted-foreground);
+  }
+  .markdown-body :global(code) {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    font-size: 0.85em;
+    background: var(--color-muted);
+    color: var(--color-accent-foreground);
+    padding: 0.12em 0.4em;
+    border-radius: 4px;
+    border: 1px solid var(--color-border-muted);
+  }
+  .markdown-body :global(pre) {
+    background: var(--color-card-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm, 6px);
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    margin: 0.75rem 0;
+  }
+  .markdown-body :global(pre code) {
+    background: none;
+    padding: 0;
+    font-size: 0.8125rem;
+    border-radius: 0;
+    border: none;
+    color: var(--color-muted-foreground-strong);
+  }
+  .markdown-body :global(strong) {
+    font-weight: 600;
+    color: var(--color-accent-foreground);
+  }
+  .markdown-body :global(em) {
+    color: var(--color-muted-foreground-strong);
+  }
+  .markdown-body :global(del) {
+    color: var(--color-muted-foreground-soft);
+  }
+  .markdown-body :global(a) {
+    color: var(--color-primary);
+    text-decoration: none;
+  }
+  .markdown-body :global(a:hover) {
+    color: var(--color-primary-hover);
+    text-decoration: underline;
+  }
   .markdown-body :global(hr) {
     border: none;
-    border-top: 1px solid #e5e7eb;
+    border-top: 1px solid var(--color-border);
     margin: 1.5rem 0;
+  }
+  .markdown-body :global(img) {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius-sm, 6px);
+    border: 1px solid var(--color-border);
   }
   .markdown-body :global(.table-wrap) {
     overflow-x: auto;
     margin: 0.75rem 0;
     -webkit-overflow-scrolling: touch;
+    border-radius: var(--radius-sm, 6px);
   }
   .markdown-body :global(table) {
     border-collapse: collapse;
     width: 100%;
     min-width: 200px;
     font-size: 0.875rem;
+    color: var(--color-foreground);
   }
   .markdown-body :global(thead) { display: table-header-group; }
   .markdown-body :global(tbody) { display: table-row-group; }
+  .markdown-body :global(tbody tr:nth-child(even)) {
+    background: color-mix(in srgb, var(--color-muted) 55%, transparent);
+  }
   .markdown-body :global(th),
   .markdown-body :global(td) {
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--color-border);
     padding: 0.4em 0.6em;
     text-align: left;
     word-break: break-word;
     vertical-align: top;
   }
   .markdown-body :global(th) {
-    background: #f5f5f5;
+    background: var(--color-card-elevated);
     font-weight: 600;
     white-space: nowrap;
+    color: var(--color-muted-foreground-strong);
   }
 
-  @media (max-width: 600px) {
-    .wrap { max-width: 100%; }
-    .col { border: none; }
-  }
+  @media (max-width: 600px) { .wrap { max-width: 100%; } }
 </style>

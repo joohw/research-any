@@ -12,7 +12,8 @@
   "dependencies": {
     "bits-ui": "^2.16.3",
     "lucide-svelte": "^0.460.0",
-    "marked": "^15.0.0"
+    "marked": "^15.0.0",
+    "simple-icons": "^16.13.0"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.8",

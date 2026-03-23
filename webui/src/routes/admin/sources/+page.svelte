@@ -1,5 +1,5 @@
 <script lang="ts">
-  /// <reference path="../../lucide-svelte.d.ts" />
+  /// <reference path="../../../lucide-svelte.d.ts" />
   import { onMount } from 'svelte';
   import { Puzzle } from 'lucide-svelte';
   import RefreshCw from 'lucide-svelte/icons/refresh-cw';
@@ -385,7 +385,7 @@
 </script>
 
 <svelte:head>
-  <title>信源 - RssAny</title>
+  <title>信源（管理）- RssAny</title>
 </svelte:head>
 
 <!-- ── 弹窗 ────────────────────────────────────────────── -->

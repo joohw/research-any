@@ -3,7 +3,7 @@
 import "dotenv/config";
 import { Agent } from "@mariozechner/pi-agent-core";
 import { getModel } from "@mariozechner/pi-ai";
-import { feedAgentTools } from "./tools.js";
+import { buildFeedAgentTools } from "./tools.js";
 
 const SYSTEM_PROMPT = `You are an expert research assistant. You help users collect, organize, and answer research questions by querying RSS feeds, searching the web, and fetching page content.
 
@@ -12,7 +12,7 @@ Guidelines:
 - Use web_search when the user needs real-time or external information not in feeds.
 - Use web_fetch when the user needs the full text of a specific URL (e.g. from search results or feed links).
 - Use send_email when the user asks to send an email, forward content, or notify someone by email (to, subject, text or html required).
-- For sandbox files (notes, drafts, long documents), use one tool: sandbox with action read | write | replace | list. Paths are relative to .rssany/sandbox. For long reads use offset/limit (lines); for replace use a unique old_string or replace_all=1.
+- For sandbox files (notes, drafts, long documents), use one tool: sandbox with action read | write | replace | list. Paths are relative to your user workspace under .rssany/sandbox/agent/<you> (not shared with other users). For long reads use offset/limit (lines); for replace use a unique old_string or replace_all=1.
 - Combine sources when answering: cite which channel, feed item, or URL each claim comes from.
 - Keep answers concise; structure with clear sections or bullets when there are multiple findings.
 - If a tool returns an error (e.g. missing TAVILY_API_KEY), say so plainly and suggest what the user can do.
@@ -20,8 +20,9 @@ Guidelines:
 Documentation:
 - Project architecture and data flow are described in the workspace AGENTS.md. Refer to it when users ask about channels, plugins, sources, or how RSS/enrich/pipeline work.`;
 
-/** 创建配置好工具的 Agent 实例 */
-export function createFeedAgent(): Agent {
+/** 创建配置好工具的 Agent 实例；传入 userId 时沙箱文件工具写入该用户独立目录 */
+export function createFeedAgent(opts?: { userId?: string }): Agent {
+  const userId = opts?.userId;
   const baseModel = getModel("openai", "gpt-4o-mini");
   const baseUrl = process.env.OPENAI_BASE_URL || baseModel.baseUrl;
   const modelId = process.env.OPENAI_MODEL || baseModel.id;
@@ -34,16 +35,15 @@ export function createFeedAgent(): Agent {
     name: modelId,
     ...(useCompletions && { api: "openai-completions" as const, provider: "openai" as const }),
   };
-  console.log("[createFeedAgent] baseUrl=%s modelId=%s useCompletions=%s apiKey=%s", baseUrl, modelId, useCompletions, process.env.OPENAI_API_KEY ? `${process.env.OPENAI_API_KEY.slice(0, 8)}…` : "(未设置)");
   const agent = new Agent({
     initialState: {
       systemPrompt: SYSTEM_PROMPT,
       model,
-      tools: feedAgentTools,
+      tools: buildFeedAgentTools(userId),
     },
     getApiKey: () => process.env.OPENAI_API_KEY,
   });
   return agent;
 }
 
-export { feedAgentTools } from "./tools.js";
+export { buildFeedAgentTools } from "./tools.js";

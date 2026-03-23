@@ -8,7 +8,7 @@ export function registerAdminApiRoutes(app: Hono): void {
     return c.json({ ok: true });
   });
 
-  /** Supabase 连接健康检查（原 SQLite integrity_check） */
+  /** Supabase 连接健康检查 */
   app.get("/api/admin/integrity-check", async (c) => {
     try {
       const result = await runIntegrityCheck();

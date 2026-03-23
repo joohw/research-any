@@ -136,10 +136,12 @@
 <style>
   .item {
     padding: 1rem 1.25rem;
-    border-bottom: 1px solid #f3f3f3;
+    border-bottom: 1px solid var(--color-border-muted);
     transition: background 0.1s;
   }
-  .item:hover { background: #fafafa; }
+  .item:hover {
+    background: var(--color-muted);
+  }
   .item.ctx-deletable { cursor: context-menu; }
 
   .ctx-menu-backdrop {
@@ -152,10 +154,10 @@
     z-index: 9999;
     min-width: 100px;
     padding: 0.25rem 0;
-    background: #fff;
-    border: 1px solid #e5e7eb;
-    border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+    background: var(--color-card-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md, 8px);
+    box-shadow: var(--shadow-panel);
   }
   .ctx-menu-item {
     display: block;
@@ -166,15 +168,21 @@
     border: none;
     background: none;
     cursor: pointer;
-    color: #333;
+    color: var(--color-foreground);
+    font-family: inherit;
   }
-  .ctx-menu-item:hover { background: #f5f5f5; }
-  .ctx-menu-item.ctx-delete:hover { background: #fef2f2; color: #b91c1c; }
+  .ctx-menu-item:hover {
+    background: var(--color-muted);
+  }
+  .ctx-menu-item.ctx-delete:hover {
+    background: color-mix(in srgb, var(--color-destructive) 14%, transparent);
+    color: var(--color-destructive);
+  }
 
   .item-author-top {
     font-size: 0.75rem;
     font-weight: 500;
-    color: #555;
+    color: var(--color-muted-foreground-strong);
     margin-bottom: 0.3rem;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -189,7 +197,7 @@
     text-decoration: underline;
   }
   .item-author-sep {
-    color: #999;
+    color: var(--color-muted-foreground-soft);
     font-weight: normal;
     pointer-events: none;
   }
@@ -197,7 +205,7 @@
   .item-title {
     font-size: 0.9rem;
     font-weight: 500;
-    color: #111;
+    color: var(--color-foreground);
     display: block;
     line-height: 1.45;
     margin-bottom: 0.3rem;
@@ -205,7 +213,7 @@
 
   .item-summary {
     font-size: 0.8rem;
-    color: #666;
+    color: var(--color-muted-foreground-strong);
     line-height: 1.55;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -220,11 +228,11 @@
     gap: 0.25rem;
     margin-bottom: 0.4rem;
     padding-top: 0.35rem;
-    border-top: 1px dashed #eee;
+    border-top: 1px dashed var(--color-border-muted);
   }
   .item-sibling-link {
     font-size: 0.8rem;
-    color: #888;
+    color: var(--color-muted-foreground);
     text-decoration: none;
     line-height: 1.4;
     display: -webkit-box;
@@ -255,7 +263,7 @@
     align-items: center;
     gap: 0.6rem;
     font-size: 0.725rem;
-    color: #bbb;
+    color: var(--color-muted-foreground-soft);
   }
 
   .item-source {
@@ -271,7 +279,7 @@
   .item-dot {
     width: 2px;
     height: 2px;
-    background: #ccc;
+    background: var(--color-muted-foreground-soft);
     border-radius: 50%;
     flex-shrink: 0;
   }

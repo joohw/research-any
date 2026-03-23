@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { marked } from 'marked';
-  import { Popover } from 'bits-ui';
   import Plus from 'lucide-svelte/icons/plus';
   import History from 'lucide-svelte/icons/history';
+  import PanelLeftClose from 'lucide-svelte/icons/panel-left-close';
   import Loader2 from 'lucide-svelte/icons/loader-2';
   import {
     agentMessages,
@@ -15,6 +15,9 @@
     sessionList,
     currentSessionId,
     currentSession,
+    agentSessionReady,
+    agentSessionUserId,
+    syncAgentSessionFromApi,
   } from '$lib/agentSession';
   import type { ToolCall, TokenUsage } from '$lib/agentSession';
 
@@ -86,7 +89,8 @@
   }
 
   let input = '';
-  let historyOpen = false;
+  /** 左侧历史会话边栏 */
+  let historySidebarOpen = false;
   let inputEl: HTMLTextAreaElement | null = null;
   let messagesEl: HTMLDivElement | null = null;
 
@@ -95,6 +99,7 @@
   let scrollCleanup: (() => void) | null = null;
 
   $: streaming = $agentStream.streaming;
+  $: canUseChat = $agentSessionReady && $agentSessionUserId !== null;
 
   $: if (messagesEl) {
     if (scrollCleanup) scrollCleanup();
@@ -134,7 +139,10 @@
   });
 
   onMount(() => {
-    rehydrateAgentMessages();
+    void (async () => {
+      await syncAgentSessionFromApi();
+      rehydrateAgentMessages();
+    })();
     inputEl?.focus();
     const onKeydown = (e: KeyboardEvent) => {
       if (e.key === 'N' && e.shiftKey && $agentMessages.length > 0 && !$agentStream.streaming) {
@@ -149,6 +157,7 @@
   async function send(promptText?: string) {
     const prompt = (promptText ?? input.trim()).trim();
     if (!prompt || $agentStream.streaming) return;
+    if (!$agentSessionReady || !$agentSessionUserId) return;
     if (!promptText) input = '';
     const history = $agentMessages.map((m) =>
       m.role === "user" ? { role: 'user' as const, content: m.content } : { role: 'assistant' as const, content: m.content, usage: m.usage }
@@ -159,11 +168,15 @@
     try {
       const res = await fetch('/api/chat/stream', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt, messages: history }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        if (res.status === 401) {
+          throw new Error('登录已过期或尚未登录，请重新登录后再使用 Agent');
+        }
         throw new Error(data.error || `HTTP ${res.status}`);
       }
       const reader = res.body?.getReader();
@@ -231,12 +244,14 @@
   function handleNewSession() {
     if ($agentMessages.length === 0) return;
     createNewSession();
-    historyOpen = false;
   }
 
   function handleLoadSession(id: string) {
     loadSession(id);
-    historyOpen = false;
+  }
+
+  function toggleHistorySidebar() {
+    historySidebarOpen = !historySidebarOpen;
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -252,67 +267,113 @@
 </svelte:head>
 
 <div class="agent-wrap">
-  <div class="agent-col">
+  <div class="agent-layout">
+    <div class="agent-col">
+    <!-- 浮层：不占文档流，全高覆盖主内容；透明遮罩仅用于点击关闭 -->
+    <div
+      class="agent-sidebar-backdrop"
+      class:open={historySidebarOpen}
+      role="presentation"
+      aria-hidden="true"
+      on:click={() => (historySidebarOpen = false)}
+    ></div>
+    <aside
+      class="agent-sidebar"
+      class:open={historySidebarOpen}
+      aria-label="历史会话"
+      aria-hidden={!historySidebarOpen}
+    >
+      <div class="agent-sidebar-header">
+        <span class="agent-sidebar-title">历史会话</span>
+        <button
+          type="button"
+          class="agent-sidebar-close"
+          title="收起侧边栏"
+          aria-label="收起侧边栏"
+          on:click={() => (historySidebarOpen = false)}
+        >
+          <PanelLeftClose size={18} />
+        </button>
+      </div>
+      <div class="agent-sidebar-body">
+        {#if $sessionList.length === 0}
+          <p class="sidebar-empty">暂无历史会话</p>
+        {:else}
+          <ul class="session-list">
+            {#each $sessionList as session (session.id)}
+              <li class="session-item group" class:is-active={session.id === $currentSessionId}>
+                <div
+                  role="button"
+                  tabindex="0"
+                  class="session-item-main"
+                  on:click={() => handleLoadSession(session.id)}
+                  on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), handleLoadSession(session.id))}
+                >
+                  <span class="session-item-title">{session.title}</span>
+                  <span class="session-item-date">{formatSessionDate(session.updatedAt)}</span>
+                </div>
+                <span
+                  role="button"
+                  tabindex="0"
+                  class="session-item-delete {$sessionList.length <= 1 ? 'is-hidden' : ''}"
+                  title="删除此会话"
+                  on:click|stopPropagation={() => $sessionList.length > 1 && deleteSession(session.id)}
+                  on:keydown|stopPropagation={(e) => e.key === 'Enter' && $sessionList.length > 1 && (e.preventDefault(), deleteSession(session.id))}
+                >×</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    </aside>
     <header class="agent-header">
       <div class="agent-header-inner">
-        <span class="agent-title">{$currentSession?.title ?? '新对话'}</span>
         <div class="agent-header-actions">
-          <Popover.Root bind:open={historyOpen} onOpenChange={(v) => (historyOpen = v)}>
-            <Popover.Trigger class="agent-header-btn agent-header-btn-icon" disabled={streaming} title="历史会话">
-              <History size={18} />
-            </Popover.Trigger>
-            <Popover.Portal>
-              <Popover.Content class="dropdown-panel agent-history-dropdown" sideOffset={6} align="end">
-                <div class="dropdown-title">历史会话</div>
-                {#if $sessionList.length === 0}
-                  <p class="dropdown-empty">暂无历史会话</p>
-                {:else}
-                  <ul class="dropdown-list">
-                    {#each $sessionList as session (session.id)}
-                      <li class="dropdown-item group">
-                        <div
-                          role="button"
-                          tabindex="0"
-                          class="dropdown-item-main {session.id === $currentSessionId ? 'is-active' : ''}"
-                          on:click={() => handleLoadSession(session.id)}
-                          on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), handleLoadSession(session.id))}
-                        >
-                          <span class="dropdown-item-title">{session.title}</span>
-                          <span class="dropdown-item-date">{formatSessionDate(session.updatedAt)}</span>
-                        </div>
-                        <span
-                          role="button"
-                          tabindex="0"
-                          class="dropdown-item-delete {$sessionList.length <= 1 ? 'is-hidden' : ''}"
-                          title="删除此会话"
-                          on:click|stopPropagation={() => $sessionList.length > 1 && deleteSession(session.id)}
-                          on:keydown|stopPropagation={(e) => e.key === 'Enter' && $sessionList.length > 1 && (e.preventDefault(), deleteSession(session.id))}
-                        >×</span>
-                      </li>
-                    {/each}
-                  </ul>
-                {/if}
-              </Popover.Content>
-            </Popover.Portal>
-          </Popover.Root>
-          <button type="button" class="agent-header-btn agent-header-btn-icon" title="新建会话" disabled={streaming} on:click={handleNewSession}>
+          <button
+            type="button"
+            class="agent-header-btn agent-header-btn-icon"
+            class:agent-header-btn-active={historySidebarOpen}
+            disabled={streaming || !canUseChat}
+            title={historySidebarOpen ? '收起历史会话' : '展开历史会话'}
+            aria-label={historySidebarOpen ? '收起历史会话' : '展开历史会话'}
+            aria-expanded={historySidebarOpen}
+            on:click={toggleHistorySidebar}
+          >
+            <History size={18} />
+          </button>
+          <button type="button" class="agent-header-btn agent-header-btn-icon" title="新建会话" disabled={streaming || !canUseChat} on:click={handleNewSession}>
             <Plus size={18} />
           </button>
         </div>
+        <span class="agent-title">{$currentSession?.title ?? '新对话'}</span>
       </div>
     </header>
     <div class="agent-messages" bind:this={messagesEl}>
+      <div class="agent-messages-inner">
       {#if $agentMessages.length === 0}
         <div class="agent-empty">
+          {#if !$agentSessionReady}
+            <p class="agent-empty-title">Research Agent</p>
+            <p class="agent-empty-desc">正在加载会话…</p>
+          {:else if !$agentSessionUserId}
+            <p class="agent-empty-title">需要登录</p>
+            <p class="agent-empty-desc">
+              Agent 对话与沙箱文件按账号隔离保存。请先登录后再使用。
+            </p>
+            <p class="agent-empty-login">
+              <a href="/login?next=/feeds" class="agent-empty-login-link">去登录</a>
+            </p>
+          {:else}
           <p class="agent-empty-title">Research Agent</p>
           <p class="agent-empty-desc">
            从本地频道与订阅 feeds 检索与综览，对比观点、持续追踪主题；需要时联网搜索并抓取网页正文。
           </p>
           <div class="quick-prompts">
             {#each QUICK_PROMPTS as prompt}
-              <button type="button" class="quick-prompt" on:click={() => send(prompt)} disabled={streaming}>{prompt}</button>
+              <button type="button" class="quick-prompt" on:click={() => send(prompt)} disabled={streaming || !canUseChat}>{prompt}</button>
             {/each}
           </div>
+          {/if}
         </div>
       {:else}
         {#each $agentMessages as msg, i (i + msg.role + msg.content + (msg.reasoning ?? '') + JSON.stringify(msg.toolCalls ?? []))}
@@ -381,6 +442,7 @@
           </div>
         {/if}
       {/if}
+      </div>
     </div>
 
     <div class="agent-input-wrap">
@@ -393,38 +455,215 @@
         on:keydown={handleKeydown}
         placeholder="输入问题，Shift+Enter 发送…"
         rows="3"
-        disabled={streaming}
+        disabled={streaming || !canUseChat}
       ></textarea>
       <div class="input-footer">
         <span class="input-hint">Shift+Enter 发送 · Enter 换行 · Shift+N 清空</span>
         <div class="input-footer-right">
-          <button type="button" class="btn-send" on:click={() => send()} disabled={streaming || !input.trim()}>
+          <button type="button" class="btn-send" on:click={() => send()} disabled={streaming || !input.trim() || !canUseChat}>
             {streaming ? '发送中…' : '发送'}
           </button>
         </div>
       </div>
     </div>
   </div>
+  </div>
 </div>
 
 <style>
   .agent-wrap {
-    height: 100vh;
-    display: flex;
-    overflow: hidden;
-    max-width: 720px;
     width: 100%;
-    margin: 0 auto;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
-  .agent-col {
+  /** 单列占满高度，侧栏绝对定位浮于其上 */
+  .agent-layout {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    overflow: hidden;
+  }
+  .agent-sidebar-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    background: transparent;
+    pointer-events: none;
+  }
+  .agent-sidebar-backdrop.open {
+    pointer-events: auto;
+  }
+  .agent-sidebar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: min(15rem, 86vw);
+    max-width: 17.5rem;
+    z-index: 11;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--color-background);
+    border-right: 1px solid var(--color-border);
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.18);
+    transform: translateX(-100%);
+    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    pointer-events: none;
+  }
+  .agent-sidebar.open {
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .agent-sidebar {
+      transition-duration: 0.01ms;
+    }
+  }
+  .agent-sidebar-header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.55rem 0.65rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .agent-sidebar-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-muted-foreground);
+    min-width: 0;
+  }
+  .agent-sidebar-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm, 6px);
+    background: transparent;
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .agent-sidebar-close:hover {
+    background: var(--color-muted);
+    color: var(--color-accent-foreground);
+  }
+  .agent-sidebar-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+  .sidebar-empty {
+    font-size: 0.8125rem;
+    color: var(--color-muted-foreground-soft);
+    padding: 0.75rem;
+    margin: 0;
+  }
+  .session-list {
+    list-style: none;
+    margin: 0;
+    padding: 0.35rem 0.35rem 0.5rem;
+  }
+  .session-item {
+    display: flex;
+    align-items: stretch;
+    margin: 0 0 0.2rem;
+    border-radius: var(--radius-sm, 6px);
+    transition: background 0.12s ease;
+  }
+  .session-item:last-child {
+    margin-bottom: 0;
+  }
+  .session-item:hover {
+    background: var(--color-muted);
+  }
+  .session-item.is-active {
+    background: var(--color-primary-light);
+  }
+  .session-item.is-active:hover {
+    background: var(--color-primary-light);
+  }
+  .session-item-main {
     flex: 1;
     display: flex;
     flex-direction: column;
+    align-items: flex-start;
+    gap: 0.1rem;
+    padding: 0.4rem 0.35rem 0.4rem 0.75rem;
+    font-size: 0.8125rem;
+    text-align: left;
+    color: var(--color-foreground);
+    min-width: 0;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    font-family: inherit;
+    border-radius: 0;
+  }
+  .session-item.is-active .session-item-main {
+    color: var(--color-primary);
+  }
+  .session-item-title {
+    display: block;
     overflow: hidden;
-    background: #fff;
-    border-left: 1px solid #e5e7eb;
-    border-right: 1px solid #e5e7eb;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
+  }
+  .session-item-date {
+    font-size: 0.6875rem;
+    color: var(--color-muted-foreground-soft);
+  }
+  .session-item.is-active .session-item-date {
+    color: var(--color-primary);
+    opacity: 0.9;
+  }
+  .session-item-delete {
+    flex-shrink: 0;
+    width: 1.75rem;
+    padding-right: 0.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    color: var(--color-muted-foreground-soft);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+    border-radius: 0 var(--radius-sm, 6px) var(--radius-sm, 6px) 0;
+  }
+  .session-item.group:hover .session-item-delete,
+  .session-item-delete:hover,
+  .session-item-delete:focus {
+    opacity: 1;
+  }
+  .session-item-delete:hover {
+    color: var(--color-destructive);
+  }
+  .session-item-delete.is-hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .agent-col {
     position: relative;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: transparent;
   }
   .agent-header {
     position: absolute;
@@ -432,34 +671,49 @@
     left: 0;
     right: 0;
     z-index: 10;
-    background: linear-gradient(to bottom, #fff 0%, rgba(255, 255, 255, 0.95) 50%, transparent 100%);
-    padding: 0.5rem 1rem 1.5rem;
+    background: linear-gradient(
+      to bottom,
+      var(--color-background) 0%,
+      color-mix(in srgb, var(--color-background) 88%, transparent) 55%,
+      transparent 100%
+    );
+    padding: 0.5rem 0 1.5rem;
     pointer-events: none;
   }
   .agent-header-inner {
-    display: flex;
+    box-sizing: border-box;
+    max-width: var(--feeds-column-max, 720px);
+    width: 100%;
+    margin: 0 auto;
+    padding-inline: var(--shell-gutter);
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    justify-content: space-between;
     gap: 0.75rem;
     pointer-events: auto;
   }
   .agent-title {
+    grid-column: 2;
+    justify-self: center;
     font-size: 0.875rem;
     font-weight: 600;
-    color: #374151;
+    color: var(--color-muted-foreground-strong);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
-    flex: 1;
+    max-width: min(28rem, calc(100vw - 9rem));
+    text-align: center;
   }
   .agent-header-actions {
+    grid-column: 1;
+    justify-self: start;
     display: flex;
     align-items: center;
     gap: 0.5rem;
     flex-shrink: 0;
   }
-  /* :global 使样式对 bits-ui Trigger 渲染的 button 生效 */
+  /* 顶栏操作按钮（原生 button） */
   :global(.agent-header-actions .agent-header-btn) {
     display: inline-flex;
     align-items: center;
@@ -469,35 +723,52 @@
     min-width: 32px;
     padding: 0.35rem 0.6rem;
     font-size: 0.8125rem;
-    color: #374151;
+    color: var(--color-muted-foreground-strong);
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-sm, 6px);
     cursor: pointer;
     font-family: inherit;
-    transition: background 0.15s, color 0.15s;
+    transition: background 0.12s ease, color 0.12s ease;
   }
   :global(.agent-header-actions .agent-header-btn:hover:not(:disabled)) {
-    background: #f3f4f6;
-    color: var(--color-primary);
+    background: var(--color-muted);
+    color: var(--color-accent-foreground);
   }
   :global(.agent-header-actions .agent-header-btn:disabled) {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: not-allowed;
   }
   :global(.agent-header-actions .agent-header-btn-icon) {
     padding: 0.4rem;
-    color: #6b7280;
+    color: var(--color-muted-foreground);
   }
   :global(.agent-header-actions .agent-header-btn-icon:hover:not(:disabled)) {
     color: var(--color-primary);
-    background: #eff6ff;
+    background: var(--color-primary-light);
+  }
+  :global(.agent-header-actions .agent-header-btn-active.agent-header-btn-icon) {
+    color: var(--color-primary-foreground);
+    background: var(--color-primary);
+  }
+  :global(.agent-header-actions .agent-header-btn-active.agent-header-btn-icon:hover:not(:disabled)) {
+    color: var(--color-primary-foreground);
+    background: var(--color-primary-hover);
   }
   .agent-messages {
     flex: 1;
     min-height: 0;
+    width: 100%;
     overflow-y: auto;
-    padding: 3.5rem 1.25rem 6rem;
+    overflow-x: hidden;
+  }
+  .agent-messages-inner {
+    box-sizing: border-box;
+    max-width: var(--feeds-column-max, 720px);
+    width: 100%;
+    margin: 0 auto;
+    /* 为顶部浮动的 meta 栏留出空间 */
+    padding: 3.5rem var(--shell-gutter) 1.25rem;
   }
   .agent-empty {
     display: flex;
@@ -511,13 +782,28 @@
   .agent-empty-title {
     font-size: 1rem;
     font-weight: 600;
-    color: #111;
+    color: var(--color-foreground);
     margin: 0 0 0.35rem;
+    letter-spacing: -0.02em;
   }
   .agent-empty-desc {
     font-size: 0.8125rem;
-    color: #6b7280;
+    color: var(--color-muted-foreground);
     margin: 0 0 1.25rem;
+    line-height: 1.55;
+    max-width: 26rem;
+  }
+  .agent-empty-login {
+    margin: 0;
+  }
+  .agent-empty-login-link {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-primary);
+    text-decoration: none;
+  }
+  .agent-empty-login-link:hover {
+    text-decoration: underline;
   }
   .quick-prompts {
     display: flex;
@@ -528,21 +814,21 @@
   .quick-prompt {
     padding: 0.5rem 0.875rem;
     font-size: 0.8125rem;
-    color: #555;
-    background: #f5f5f5;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
+    color: var(--color-muted-foreground-strong);
+    background: var(--color-card-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md, 8px);
     cursor: pointer;
     font-family: inherit;
-    transition: background 0.15s, border-color 0.15s;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
   }
   .quick-prompt:hover:not(:disabled) {
-    background: #eee;
-    border-color: #d1d5db;
-    color: #111;
+    background: var(--color-muted);
+    border-color: var(--color-border-muted);
+    color: var(--color-accent-foreground);
   }
   .quick-prompt:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: not-allowed;
   }
   .msg {
@@ -552,21 +838,22 @@
     font-size: 0.875rem;
     line-height: 1.65;
     word-break: break-word;
-    color: #111;
+    color: var(--color-foreground);
   }
   .msg.user .msg-content {
     white-space: pre-wrap;
   }
   .msg.user {
-    background: #f5f5f5;
+    background: var(--color-muted);
     margin-left: -0.5rem;
     margin-right: -0.5rem;
     padding: 0.5rem 0.75rem;
-    border-radius: 8px;
+    border-radius: var(--radius-md, 8px);
+    border: 1px solid var(--color-border-muted);
   }
   .msg-usage {
     font-size: 0.6875rem;
-    color: #9ca3af;
+    color: var(--color-muted-foreground-soft);
     margin-top: 0.35rem;
   }
   .tool-calls {
@@ -581,13 +868,14 @@
     gap: 0.35rem;
     font-size: 0.75rem;
     padding: 0.25rem 0.5rem;
-    border-radius: 6px;
-    background: #f5f5f5;
-    border: 1px solid #e8e8e8;
+    border-radius: var(--radius-sm, 6px);
+    background: var(--color-card-elevated);
+    border: 1px solid var(--color-border);
+    color: var(--color-muted-foreground-strong);
   }
   .tool-call.running {
-    background: #e8f4fd;
-    border-color: #b3d9f5;
+    background: var(--color-primary-light);
+    border-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
     color: var(--color-primary);
   }
   .tool-call-spinner {
@@ -602,14 +890,14 @@
     animation: tool-spin 1s linear infinite;
   }
   .tool-call.success {
-    background: #f0f9f0;
-    border-color: #c8e6c9;
-    color: #2e7d32;
+    background: color-mix(in srgb, var(--color-success) 14%, transparent);
+    border-color: color-mix(in srgb, var(--color-success) 35%, transparent);
+    color: var(--color-success);
   }
   .tool-call.error {
-    background: #fff5f5;
-    border-color: #ffcdd2;
-    color: #c62828;
+    background: color-mix(in srgb, var(--color-destructive) 14%, transparent);
+    border-color: color-mix(in srgb, var(--color-destructive) 35%, transparent);
+    color: var(--color-destructive);
   }
   .tool-call-icon {
     font-size: 0.8em;
@@ -623,7 +911,7 @@
     font-weight: 500;
   }
   .tool-call-args {
-    color: #888;
+    color: var(--color-muted-foreground);
     font-size: 0.9em;
     max-width: 12rem;
     overflow: hidden;
@@ -633,10 +921,10 @@
   .agent-reasoning {
     margin-bottom: 0.5rem;
     font-size: 0.8125rem;
-    color: #6b7280;
-    background: #f9fafb;
-    border: 1px solid #e5e7eb;
-    border-radius: 6px;
+    color: var(--color-muted-foreground);
+    background: var(--color-card-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm, 6px);
     overflow: hidden;
   }
   .agent-reasoning summary {
@@ -665,7 +953,7 @@
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-word;
-    border-top: 1px solid #f3f4f6;
+    border-top: 1px solid var(--color-hairline);
   }
   .cursor {
     animation: blink 1s step-end infinite;
@@ -675,19 +963,24 @@
     50% { opacity: 0; }
   }
   .agent-input-wrap {
+    box-sizing: border-box;
     flex-shrink: 0;
-    border-top: 1px solid #f0f0f0;
-    padding: 0.75rem 1.25rem 1rem;
+    max-width: var(--feeds-column-max, 720px);
+    width: 100%;
+    margin: 0 auto;
+    border-top: 1px solid var(--color-hairline);
+    padding: 0.75rem var(--shell-gutter) 1rem;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    background: var(--color-background);
   }
   .agent-error {
     font-size: 0.8rem;
-    color: #c62828;
-    background: #fff5f5;
-    border: 1px solid #ffcdd2;
-    border-radius: 6px;
+    color: var(--color-destructive);
+    background: color-mix(in srgb, var(--color-destructive) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-destructive) 35%, transparent);
+    border-radius: var(--radius-sm, 6px);
     padding: 0.4rem 0.75rem;
   }
   .agent-input-wrap textarea {
@@ -699,9 +992,12 @@
     font-size: 0.875rem;
     font-family: inherit;
     line-height: 1.5;
-    color: #111;
+    color: var(--color-foreground);
     background: transparent;
     box-shadow: none;
+  }
+  .agent-input-wrap textarea::placeholder {
+    color: var(--color-muted-foreground-soft);
   }
   .agent-input-wrap textarea:focus {
     outline: none;
@@ -710,7 +1006,7 @@
   }
   .agent-input-wrap textarea:disabled {
     background: transparent;
-    color: #999;
+    color: var(--color-muted-foreground-soft);
     opacity: 1;
   }
   .input-footer {
@@ -720,7 +1016,7 @@
   }
   .input-hint {
     font-size: 0.75rem;
-    color: #bbb;
+    color: var(--color-muted-foreground-soft);
   }
   .input-footer-right {
     display: flex;
@@ -730,158 +1026,160 @@
   .btn-send {
     padding: 0.45rem 1.125rem;
     background: var(--color-primary);
-    color: #fff;
+    color: var(--color-primary-foreground);
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-sm, 6px);
     font-size: 0.8125rem;
     font-weight: 500;
     cursor: pointer;
+    transition: background 0.12s ease;
   }
   .btn-send:hover:not(:disabled) {
     background: var(--color-primary-hover);
   }
   .btn-send:disabled {
-    background: #ccc;
+    background: var(--color-muted);
+    color: var(--color-muted-foreground-soft);
     cursor: not-allowed;
   }
-  /* dropdown (history) */
-  :global(.dropdown-panel) {
-    z-index: 50;
-    background: var(--color-card);
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  }
-  :global(.agent-history-dropdown) {
-    min-width: 14rem;
-    max-width: 20rem;
-    max-height: min(60vh, 360px);
-    overflow-y: auto;
-  }
-  .dropdown-title {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--color-muted-foreground);
-    padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid var(--color-border);
-  }
-  .dropdown-empty {
-    font-size: 0.8125rem;
-    color: var(--color-muted-foreground-soft);
-    padding: 0.75rem;
-    margin: 0;
-  }
-  .dropdown-list {
-    list-style: none;
-    margin: 0;
-    padding: 0.25rem 0;
-  }
-  .dropdown-item {
-    display: flex;
-    align-items: stretch;
-  }
-  .dropdown-item-main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.1rem;
-    padding: 0.4rem 0.75rem;
-    font-size: 0.8125rem;
-    text-align: left;
+  /* markdown（与 app.css Linear 深色令牌一致） */
+  :global(.msg-content.markdown-body) {
+    font-size: 0.875rem;
+    line-height: 1.65;
     color: var(--color-foreground);
-    min-width: 0;
-    cursor: pointer;
-    border: none;
-    background: transparent;
-    font-family: inherit;
-    border-radius: 0;
   }
-  .dropdown-item-main:hover {
-    background: var(--color-muted);
+  :global(.msg-content.markdown-body p) {
+    margin: 0 0 0.6em;
   }
-  .dropdown-item-main.is-active {
-    background: var(--color-primary-light);
-    color: var(--color-primary);
+  :global(.msg-content.markdown-body p:last-child) {
+    margin-bottom: 0;
   }
-  .dropdown-item-title {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    width: 100%;
-  }
-  .dropdown-item-date {
-    font-size: 0.6875rem;
-    color: var(--color-muted-foreground-soft);
-  }
-  .dropdown-item-main.is-active .dropdown-item-date {
-    color: var(--color-primary);
-    opacity: 0.9;
-  }
-  .dropdown-item-delete {
-    flex-shrink: 0;
-    width: 1.75rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1rem;
-    color: var(--color-muted-foreground-soft);
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s;
-  }
-  .dropdown-item.group:hover .dropdown-item-delete,
-  .dropdown-item-delete:hover,
-  .dropdown-item-delete:focus {
-    opacity: 1;
-  }
-  .dropdown-item-delete:hover {
-    color: var(--color-destructive);
-  }
-  .dropdown-item-delete.is-hidden {
-    opacity: 0;
-    pointer-events: none;
-  }
-  /* markdown */
-  :global(.msg-content.markdown-body) { font-size: 0.875rem; line-height: 1.65; color: #111; }
-  :global(.msg-content.markdown-body p) { margin: 0 0 0.6em; }
-  :global(.msg-content.markdown-body p:last-child) { margin-bottom: 0; }
   :global(.msg-content.markdown-body ul),
-  :global(.msg-content.markdown-body ol) { margin: 0.4em 0 0.6em 1.25em; padding: 0; }
-  :global(.msg-content.markdown-body li) { margin-bottom: 0.2em; }
+  :global(.msg-content.markdown-body ol) {
+    margin: 0.4em 0 0.6em 1.25em;
+    padding: 0;
+    color: var(--color-foreground);
+  }
+  :global(.msg-content.markdown-body li) {
+    margin-bottom: 0.2em;
+  }
+  :global(.msg-content.markdown-body li::marker) {
+    color: var(--color-muted-foreground);
+  }
   :global(.msg-content.markdown-body h1),
   :global(.msg-content.markdown-body h2),
-  :global(.msg-content.markdown-body h3) { font-weight: 600; margin: 0.75em 0 0.35em; line-height: 1.3; }
-  :global(.msg-content.markdown-body h1) { font-size: 1.05em; }
-  :global(.msg-content.markdown-body h2) { font-size: 0.975em; }
-  :global(.msg-content.markdown-body h3) { font-size: 0.9em; }
+  :global(.msg-content.markdown-body h3) {
+    font-weight: 600;
+    margin: 0.75em 0 0.35em;
+    line-height: 1.3;
+    color: var(--color-foreground);
+    letter-spacing: -0.02em;
+  }
+  :global(.msg-content.markdown-body h1) {
+    font-size: 1.05em;
+  }
+  :global(.msg-content.markdown-body h2) {
+    font-size: 0.975em;
+  }
+  :global(.msg-content.markdown-body h3) {
+    font-size: 0.9em;
+  }
   :global(.msg-content.markdown-body code) {
     font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
     font-size: 0.85em;
-    background: #f0f0f0;
-    padding: 0.1em 0.35em;
+    background: var(--color-muted);
+    color: var(--color-accent-foreground);
+    padding: 0.12em 0.4em;
     border-radius: 4px;
+    border: 1px solid var(--color-border-muted);
   }
   :global(.msg-content.markdown-body pre) {
-    background: #f5f5f5;
-    border: 1px solid #e8e8e8;
-    border-radius: 6px;
+    background: var(--color-card-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm, 6px);
     padding: 0.75rem 1rem;
     overflow-x: auto;
     margin: 0.5em 0;
   }
-  :global(.msg-content.markdown-body pre code) { background: none; padding: 0; font-size: 0.8125rem; border-radius: 0; }
-  :global(.msg-content.markdown-body blockquote) { border-left: 3px solid #ddd; margin: 0.5em 0; padding: 0.25em 0.75em; color: #666; }
-  :global(.msg-content.markdown-body a) { color: var(--color-primary); text-decoration: none; }
-  :global(.msg-content.markdown-body a:hover) { text-decoration: underline; }
-  :global(.msg-content.markdown-body hr) { border: none; border-top: 1px solid #e5e7eb; margin: 0.75em 0; }
-  :global(.msg-content.markdown-body strong) { font-weight: 600; }
-  :global(.msg-content.markdown-body .table-wrap) { overflow-x: auto; margin: 0.5em 0; -webkit-overflow-scrolling: touch; }
-  :global(.msg-content.markdown-body table) { border-collapse: collapse; width: 100%; min-width: 200px; font-size: 0.85em; }
-  :global(.msg-content.markdown-body thead) { display: table-header-group; }
-  :global(.msg-content.markdown-body tbody) { display: table-row-group; }
+  :global(.msg-content.markdown-body pre code) {
+    background: none;
+    padding: 0;
+    font-size: 0.8125rem;
+    border-radius: 0;
+    border: none;
+    color: var(--color-muted-foreground-strong);
+  }
+  :global(.msg-content.markdown-body blockquote) {
+    border-left: 3px solid var(--color-primary);
+    margin: 0.5em 0;
+    padding: 0.25em 0.75em;
+    color: var(--color-muted-foreground);
+    background: color-mix(in srgb, var(--color-card-elevated) 80%, transparent);
+    border-radius: 0 var(--radius-sm, 6px) var(--radius-sm, 6px) 0;
+  }
+  :global(.msg-content.markdown-body a) {
+    color: var(--color-primary);
+    text-decoration: none;
+  }
+  :global(.msg-content.markdown-body a:hover) {
+    color: var(--color-primary-hover);
+    text-decoration: underline;
+  }
+  :global(.msg-content.markdown-body hr) {
+    border: none;
+    border-top: 1px solid var(--color-border);
+    margin: 0.75em 0;
+  }
+  :global(.msg-content.markdown-body strong) {
+    font-weight: 600;
+    color: var(--color-accent-foreground);
+  }
+  :global(.msg-content.markdown-body em) {
+    color: var(--color-muted-foreground-strong);
+  }
+  :global(.msg-content.markdown-body del) {
+    color: var(--color-muted-foreground-soft);
+  }
+  :global(.msg-content.markdown-body img) {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius-sm, 6px);
+    border: 1px solid var(--color-border);
+  }
+  :global(.msg-content.markdown-body .table-wrap) {
+    overflow-x: auto;
+    margin: 0.5em 0;
+    -webkit-overflow-scrolling: touch;
+    border-radius: var(--radius-sm, 6px);
+  }
+  :global(.msg-content.markdown-body table) {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 200px;
+    font-size: 0.85em;
+    color: var(--color-foreground);
+  }
+  :global(.msg-content.markdown-body thead) {
+    display: table-header-group;
+  }
+  :global(.msg-content.markdown-body tbody) {
+    display: table-row-group;
+  }
+  :global(.msg-content.markdown-body tbody tr:nth-child(even)) {
+    background: color-mix(in srgb, var(--color-muted) 55%, transparent);
+  }
   :global(.msg-content.markdown-body th),
-  :global(.msg-content.markdown-body td) { border: 1px solid #e5e7eb; padding: 0.35em 0.6em; text-align: left; word-break: break-word; vertical-align: top; }
-  :global(.msg-content.markdown-body th) { background: #f5f5f5; font-weight: 600; white-space: nowrap; }
+  :global(.msg-content.markdown-body td) {
+    border: 1px solid var(--color-border);
+    padding: 0.35em 0.6em;
+    text-align: left;
+    word-break: break-word;
+    vertical-align: top;
+  }
+  :global(.msg-content.markdown-body th) {
+    background: var(--color-card-elevated);
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--color-muted-foreground-strong);
+  }
 </style>

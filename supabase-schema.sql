@@ -129,18 +129,51 @@ CREATE INDEX IF NOT EXISTS idx_user_items_user ON user_items(user_id);
 -- ─── user_email_reports ───────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS user_email_reports (
-  id           BIGSERIAL PRIMARY KEY,
-  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  title        TEXT NOT NULL,
-  channel_ids  TEXT,
-  schedule     TEXT NOT NULL DEFAULT '0 8 * * *',
-  last_sent_at TEXT,
-  enabled      INTEGER NOT NULL DEFAULT 1,
-  mode         TEXT NOT NULL DEFAULT 'digest',
-  extra_prompt TEXT
+  id                 BIGSERIAL PRIMARY KEY,
+  user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title              TEXT NOT NULL,
+  channel_ids        TEXT,
+  schedule           TEXT NOT NULL DEFAULT '0 6 * * *',
+  last_sent_at       TEXT,
+  enabled            INTEGER NOT NULL DEFAULT 1,
+  mode               TEXT NOT NULL DEFAULT 'digest',
+  extra_prompt       TEXT,
+  draft_markdown     TEXT,
+  draft_generated_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_email_reports_user ON user_email_reports(user_id);
+
+-- ─── user_agent_tasks ─────────────────────────────────────────────────────────
+-- 应用只使用本表；本地 .rssany/user-tasks/*.json 不参与，可自行删除旧文件。
+
+CREATE TABLE IF NOT EXISTS user_agent_tasks (
+  id          BIGSERIAL PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title       TEXT NOT NULL,
+  prompt      TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  refresh     INTEGER NOT NULL DEFAULT 1,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (timezone('utc', now())::text),
+  UNIQUE(user_id, title),
+  CHECK (refresh >= 1)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_agent_tasks_user ON user_agent_tasks(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_agent_tasks_user_sort ON user_agent_tasks(user_id, sort_order);
+
+-- ─── user_daily_subscriptions ─────────────────────────────────────────────────
+-- 系统日报开关（定义在 app/config/dailyReports.json，全员共享 prompt）
+
+CREATE TABLE IF NOT EXISTS user_daily_subscriptions (
+  user_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  daily_key TEXT NOT NULL,
+  enabled   BOOLEAN NOT NULL DEFAULT false,
+  PRIMARY KEY (user_id, daily_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_daily_subs_enabled ON user_daily_subscriptions(user_id) WHERE enabled = true;
 
 -- ─── RPC 函数 ─────────────────────────────────────────────────────────────────
 
@@ -229,3 +262,11 @@ BEGIN
   FROM filtered f;
 END;
 $$ LANGUAGE plpgsql STABLE;
+
+-- 已有库补列：研究报告夜间写作草稿（每日 1:00 写入，6:00 发出）
+ALTER TABLE user_email_reports ADD COLUMN IF NOT EXISTS draft_markdown TEXT;
+ALTER TABLE user_email_reports ADD COLUMN IF NOT EXISTS draft_generated_at TEXT;
+
+-- 旧版单条日报表可删除；新版多行订阅：
+DROP TABLE IF EXISTS user_daily_digest;
+DROP TABLE IF EXISTS user_daily_subscriptions;

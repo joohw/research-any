@@ -1,11 +1,11 @@
-// 数据库模块：Supabase（PostgreSQL）实现，替代原 better-sqlite3
+// 数据库模块：Supabase（PostgreSQL）
 
 import { readFile, writeFile } from "node:fs/promises";
 import { supabase } from "./client.js";
 import type { FeedItem } from "../types/feedItem.js";
 import { normalizeAuthor } from "../types/feedItem.js";
 import type { LogEntry } from "../core/logger/types.js";
-import { TASKS_CONFIG_PATH, TAGS_CONFIG_PATH } from "../config/paths.js";
+import { TAGS_CONFIG_PATH } from "../config/paths.js";
 
 // Postgres 处理并发，此处为纯 pass-through，保留导出供现有调用方使用
 export async function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
@@ -483,48 +483,22 @@ export async function getSuggestedTags(): Promise<TagStat[]> {
     .map((s) => ({ name: s.name, count: s.count, hotness: Math.round(s.hotness * 100) / 100 }));
 }
 
-// ─── Agent 任务 & 系统标签（文件存储，不依赖 DB）──────────────────────────────
+// ─── Agent 任务（Supabase user_agent_tasks）& 系统标签（文件）────────────────────────
 
-export interface AgentTask {
-  title: string;
-  prompt?: string;
-  description?: string;
-  refresh?: number;
-}
+export type { AgentTask } from "./userAgentTasks.js";
 
-export async function getAgentTasks(): Promise<AgentTask[]> {
-  try {
-    const raw = await readFile(TASKS_CONFIG_PATH, "utf-8");
-    const parsed = JSON.parse(raw) as { tasks?: unknown[] };
-    if (!Array.isArray(parsed?.tasks)) return [];
-    const rawTasks = parsed.tasks.filter(
-      (t): t is Record<string, unknown> => t != null && typeof t === "object" && typeof (t as { title?: unknown }).title === "string"
-    );
-    const tasks: AgentTask[] = [];
-    for (const t of rawTasks) {
-      const title = String((t as { title: string }).title).trim();
-      if (!title) continue;
-      const prompt = typeof (t as { prompt?: unknown }).prompt === "string" ? (t as { prompt: string }).prompt : "";
-      const description = typeof (t as { description?: unknown }).description === "string" ? (t as { description: string }).description : "";
-      const r = (t as { refresh?: unknown }).refresh;
-      const refresh = typeof r === "number" && !Number.isNaN(r) && r >= 1 ? Math.floor(r) : 1;
-      tasks.push({ title, prompt, description, refresh });
-    }
-    return tasks;
-  } catch { return []; }
-}
-
-export async function saveAgentTasks(tasks: AgentTask[]): Promise<void> {
-  const list = tasks
-    .filter((t) => t && typeof t.title === "string" && t.title.trim())
-    .map((t) => ({
-      title: t.title.trim(),
-      prompt: typeof t.prompt === "string" ? t.prompt : "",
-      description: typeof t.description === "string" ? t.description : "",
-      refresh: typeof t.refresh === "number" && t.refresh >= 1 ? Math.floor(t.refresh) : 1,
-    }));
-  await writeFile(TASKS_CONFIG_PATH, JSON.stringify({ tasks: list }, null, 2), "utf-8");
-}
+export {
+  ensureDailySubscriptionsForUser,
+  getDailySubscriptionMap,
+  setDailySubscription,
+  listUserIdsWithEnabledDailySubscription,
+  listUserIdsWithTopicScheduling,
+  hasAnyEnabledSubscriberForDailyKey,
+  listEnabledSubscribersWithEmailForDailyKey,
+  probeDailySubscriptionsTableAvailable,
+  subscriptionsTableNotReadyMessage,
+  isMissingSubscriptionsTableError,
+} from "./userDailySubscriptions.js";
 
 export async function getSystemTags(): Promise<string[]> {
   try {
@@ -543,10 +517,7 @@ export async function saveSystemTagsToFile(tags: string[]): Promise<void> {
 }
 
 export async function getTagPeriods(): Promise<Record<string, number>> {
-  const tasks = await getAgentTasks();
-  const out: Record<string, number> = {};
-  for (const t of tasks) out[t.title] = Math.max(1, Math.floor(Number(t.refresh)) || 1);
-  return out;
+  return {};
 }
 
 // ─── 类型 ──────────────────────────────────────────────────────────────────

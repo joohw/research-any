@@ -37,6 +37,7 @@
       title: '管理',
       links: [
         { href: '/admin/channels', label: '频道', desc: '首页信息流分组与信源聚合' },
+        { href: '/admin/sources', label: '信源', desc: 'sources.json 订阅列表、刷新策略与强制拉取' },
         { href: '/admin/tags', label: '标签', desc: '系统标签库，新入库条目由 LLM 自动匹配打标签' },
         { href: '/admin/pipeline', label: 'Pipeline', desc: '入库前处理（打标签、翻译），支持顺序与开关' },
         { href: '/admin/plugins', label: '插件', desc: '已加载插件与登录状态' },

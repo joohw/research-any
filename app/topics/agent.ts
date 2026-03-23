@@ -2,13 +2,15 @@
 
 import { Agent } from "@mariozechner/pi-agent-core";
 import { getModel, streamSimple } from "@mariozechner/pi-ai";
-import { feedAgentTools } from "../agent/tools.js";
+import { buildFeedAgentTools } from "../agent/tools.js";
 
 /** 日报/话题报告生成时的最大输出 token 数，避免被模型默认值（如 16k）截断导致内容过简 */
 const DIGEST_MAX_TOKENS = Number(process.env.DIGEST_MAX_TOKENS) || 32768;
 
 
 const DIGEST_SYSTEM_PROMPT = `你是一位资深行业信息编辑，负责生成行业简报或话题追踪报告。你的工作准则：只呈现真正重要的信息，用精炼但有深度的语言传递核心价值；每条核心动态需充分展开（事件、数据、影响），避免一句话概括，不堆砌套话。候选与成文均优先按与当前话题、用户说明的相关性排序：越贴近的越靠前，弱相关归入「其它动态」或酌情省略。
+
+成稿时不要写任何元叙述（例如说明自己「基于完整内容」「即将生成报告」、复述条目数量或周期），不要输出「任务报告 ·」类标题；直接按用户消息中的格式从「## 话题追踪：」起写正文。
 
 你拥有以下工具来完成任务：
 - list_channels: 列出所有频道
@@ -23,7 +25,7 @@ function buildTaskPrompt(
   topic: string,
   periodDays: number,
   previousArticle?: string | null,
-  opts?: { referenceTags?: string[]; prompt?: string; windowItemCount?: number }
+  opts?: { referenceTags?: string[]; prompt?: string }
 ): string {
   const until = new Date();
   until.setDate(until.getDate() + 1);
@@ -37,11 +39,6 @@ function buildTaskPrompt(
     refTags.length > 0
       ? `\n\n**配置标签（仅供参考，不约束检索方式；不必因此调用 get_feeds 的 tags）**：${refTags.join("、")}`
       : "";
-  const windowHint =
-    typeof opts?.windowItemCount === "number"
-      ? `\n\n参考：该时间范围内库中约有 ${opts.windowItemCount} 条条目（未按标签过滤，仅供把握规模）。`
-      : "";
-
   const prevSection = previousArticle
     ? `
 
@@ -55,15 +52,15 @@ ${previousArticle}
 `
     : "";
 
-  return `请为话题「${topic}」撰写一份追踪报告，时间范围为最近 ${periodDays} 天（${sinceStr} 至 ${untilStr}）。${promptHint}${referenceTagsHint}${windowHint}${prevSection}
+  return `请为话题「${topic}」撰写一份追踪报告，时间范围为最近 ${periodDays} 天（${sinceStr} 至 ${untilStr}）。${promptHint}${referenceTagsHint}${prevSection}
 
-执行步骤：
+执行步骤（内部执行，不要在成稿中复述步骤名或「基于完整内容」「我将生成」等过渡语）：
 1. 调用 get_feeds（since="${sinceStr}", until="${untilStr}", limit=200）获取该时间范围内的文章（列表过大时可分页，或按需使用 channel_id、全文 q 等；勿将配置标签当作必选过滤条件）
 2. 根据标题、摘要及与话题的相关性，判断哪些内容影响力大、值得深读（通常 5-8 条）
 3. 对每条重要内容调用 get_feed_detail 获取完整正文（最多调用 8 次）
-4. 基于完整正文输出结构化报告
+4. 直接按下方「报告输出格式」写出终稿，不要先写任何铺垫句
 
-报告输出格式（严格遵循）：
+报告输出格式（严格遵循；成稿从下一行规定的首级标题开始，前面不要有任何段落）：
 
 ## 话题追踪：${topic}
 
@@ -94,11 +91,28 @@ ${previousArticle}
 - 所有 URL 完整保留，不得修改或省略
 - 行文使用中文，专有名词保留原文
 - 核心动态每条正文总字数不少于 200 字（建议 200–400 字），需有具体技术细节、数据或引用支撑，不得泛泛而谈或仅用一两句话概括；报告要有深度，宁可少几条也要写透每条
-- 直接输出 Markdown，不要加任何前言、后记或说明性文字`;
+- 直接输出 Markdown；禁止任何前言、后记、元说明（尤其不要写「现在基于…」「我将生成…」「任务报告 ·」「Agent 生成于」「周期」「库中约…条」等），正文必须从「## 话题追踪：」起笔`;
+}
+
+/** 去掉模型偶发输出的元话语、或仿旧版模板的标题行 */
+function stripDigestNoise(raw: string): string {
+  let s = raw.trim();
+  s = s.replace(
+    /^#\s*任务报告\s*·[^\r\n]*(?:\r?\n){2}>\s*Agent[^\r\n]*(?:\r?\n){2}/,
+    ""
+  );
+  s = s.replace(/^#{1,6}\s*任务报告[^\n]*\n+/m, "");
+  s = s.replace(/^现在基于获取的完整内容，我将生成结构化报告[：:]\s*/m, "");
+  s = s.replace(
+    /^(?:现在)?基于[^。\n]{0,48}(?:获取的完整内容|完整内容|正文)[，,]?\s*我将生成[^：\n]{0,36}[：:]\s*/m,
+    ""
+  );
+  s = s.replace(/^我将(?:基于|根据)[^：\n]{0,48}[：:]\s*/m, "");
+  return s.trim();
 }
 
 
-function createDigestAgent(): Agent {
+function createDigestAgent(userId: string): Agent {
   const baseModel = getModel("openai", "gpt-4o-mini");
   const baseUrl = process.env.OPENAI_BASE_URL || baseModel.baseUrl;
   const modelId = process.env.OPENAI_MODEL || baseModel.id;
@@ -114,7 +128,7 @@ function createDigestAgent(): Agent {
     initialState: {
       systemPrompt: DIGEST_SYSTEM_PROMPT,
       model,
-      tools: feedAgentTools,
+      tools: buildFeedAgentTools(userId),
     },
     getApiKey: () => process.env.OPENAI_API_KEY,
     // 提高单轮输出上限，确保最终报告有足够篇幅与深度（否则易被默认 maxTokens 截断）
@@ -132,22 +146,20 @@ function createDigestAgent(): Agent {
 export async function runDigestAgent(
   key: string,
   options: {
+    userId: string;
     periodDays?: number;
     previousArticle?: string | null;
     /** @deprecated 已不再使用配置标签 */
     referenceTags?: string[];
     prompt?: string;
-    /** 时间窗内未按标签过滤的条目总数，仅供模型把握规模 */
-    windowItemCount?: number;
-  }
+  },
 ): Promise<string> {
-  const agent = createDigestAgent();
+  const agent = createDigestAgent(options.userId);
   let output = "";
 
   const prompt = buildTaskPrompt(key, options.periodDays ?? 1, options.previousArticle, {
     referenceTags: options.referenceTags,
     prompt: options.prompt,
-    windowItemCount: options.windowItemCount,
   });
 
   return new Promise<string>((resolve, reject) => {
@@ -159,7 +171,8 @@ export async function runDigestAgent(
         output += e.assistantMessageEvent.delta;
       } else if (e.type === "agent_end") {
         // 过滤推理模型（如 DeepSeek-R1）输出的 <think>...</think> 思考过程
-        const cleaned = output.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+        let cleaned = output.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+        cleaned = stripDigestNoise(cleaned);
         resolve(cleaned);
       }
     });
@@ -168,11 +181,12 @@ export async function runDigestAgent(
   });
 }
 
-/** @deprecated 使用 runDigestAgent */
+/** @deprecated 使用 runDigestAgent，并传入 userId */
 export async function runTopicDigestAgent(
   topic: string,
   periodDays: number,
-  previousArticle?: string | null
+  previousArticle?: string | null,
+  userId = "legacy",
 ): Promise<string> {
-  return runDigestAgent(topic, { periodDays, previousArticle });
+  return runDigestAgent(topic, { userId, periodDays, previousArticle });
 }

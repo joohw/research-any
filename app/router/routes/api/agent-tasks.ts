@@ -1,75 +1,35 @@
-// 定时 Agent 任务：/api/agent-tasks（与 POST /api/tasks 异步队列区分）
+// 日报报告读写：仅支持系统日报标题（与 dailyReports.json 一致），不允许用户自定义任务
 
 import type { Hono } from "hono";
-import { getAgentTasks, saveAgentTasks } from "../../../db/index.js";
+import { getDailyReportByTitle } from "../../../config/loadDailyReports.js";
 import { TOPIC_TASK_BASE_DIR } from "../../../config/paths.js";
 import { readDigest, listDigestDates, generateDigest } from "../../../topics/index.js";
+import { requireAuth } from "../../../auth/middleware.js";
 
 export function registerAgentTasksRoutes(app: Hono): void {
-  app.get("/api/agent-tasks", async (c) => {
-    const tasks = await getAgentTasks();
-    const withReports = await Promise.all(
-      tasks.map(async (t) => {
-        const dates = await listDigestDates(TOPIC_TASK_BASE_DIR, t.title);
-        return {
-          title: t.title,
-          description: t.description ?? "",
-          prompt: t.prompt ?? "",
-          refresh: t.refresh ?? 1,
-          reportCount: dates.length,
-        };
-      }),
-    );
-    return c.json({ tasks: withReports });
+  app.get("/api/agent-tasks", requireAuth(), async (c) => {
+    return c.json({ tasks: [] as [] });
   });
 
-  app.put("/api/agent-tasks", async (c) => {
-    try {
-      const body = await c.req.json<{
-        tasks?: Array<{ title: string; prompt?: string; description?: string; refresh?: number }>;
-      }>();
-      const list = Array.isArray(body?.tasks) ? body.tasks : [];
-      const tasks = list
-        .filter((t) => t && typeof t.title === "string" && t.title.trim())
-        .map((t) => ({
-          title: t.title.trim(),
-          prompt: typeof t.prompt === "string" ? t.prompt : "",
-          description: typeof t.description === "string" ? t.description : "",
-          refresh: typeof t.refresh === "number" && t.refresh >= 1 ? Math.floor(t.refresh) : 1,
-        }));
-      await saveAgentTasks(tasks);
-      const withReports = await Promise.all(
-        tasks.map(async (t) => {
-          const dates = await listDigestDates(TOPIC_TASK_BASE_DIR, t.title);
-          return {
-            title: t.title,
-            description: t.description ?? "",
-            prompt: t.prompt ?? "",
-            refresh: t.refresh ?? 1,
-            reportCount: dates.length,
-          };
-        }),
-      );
-      return c.json({
-        ok: true,
-        tasks: withReports,
-      });
-    } catch (err) {
-      return c.json({ ok: false, message: err instanceof Error ? err.message : String(err) }, 400);
-    }
+  app.put("/api/agent-tasks", requireAuth(), async (c) => {
+    return c.json({ ok: false, message: "不允许自定义日报，仅可使用服务端配置的系统日报。" }, 403);
   });
 
-  app.get("/api/agent-tasks/:key/dates", async (c) => {
+  app.get("/api/agent-tasks/:key/dates", requireAuth(), async (c) => {
     const key = decodeURIComponent(c.req.param("key") ?? "").trim();
     if (!key) return c.json({ error: "key 参数缺失" }, 400);
+    const sys = await getDailyReportByTitle(key);
+    if (!sys) return c.json({ error: "非系统日报" }, 404);
     const dates = await listDigestDates(TOPIC_TASK_BASE_DIR, key);
     const latest = dates[0] ?? null;
     return c.json({ key, dates, latest });
   });
 
-  app.get("/api/agent-tasks/:key", async (c) => {
+  app.get("/api/agent-tasks/:key", requireAuth(), async (c) => {
     const key = decodeURIComponent(c.req.param("key") ?? "").trim();
     if (!key) return c.json({ error: "key 参数缺失" }, 400);
+    const sys = await getDailyReportByTitle(key);
+    if (!sys) return c.json({ error: "非系统日报" }, 404);
     const date = c.req.query("date");
     const result = await readDigest(TOPIC_TASK_BASE_DIR, key, date);
     if (result === null) {
@@ -78,9 +38,11 @@ export function registerAgentTasksRoutes(app: Hono): void {
     return c.json({ key, content: result.content, date: result.date, exists: true });
   });
 
-  app.post("/api/agent-tasks/:key/generate", async (c) => {
+  app.post("/api/agent-tasks/:key/generate", requireAuth(), async (c) => {
     const key = decodeURIComponent(c.req.param("key") ?? "").trim();
     if (!key) return c.json({ error: "key 参数缺失" }, 400);
+    const sys = await getDailyReportByTitle(key);
+    if (!sys) return c.json({ error: "非系统日报" }, 404);
     const body = await c.req.json<{ force?: boolean }>().catch(() => ({} as { force?: boolean }));
     try {
       const result = await generateDigest(TOPIC_TASK_BASE_DIR, key, body?.force ?? true);

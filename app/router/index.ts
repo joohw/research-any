@@ -19,8 +19,6 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerUserAuthRoutes } from "./routes/userAuth.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerRssRoutes } from "./routes/rss.js";
-import { initEmailScheduler } from "../email/scheduler.js";
-
 const PORT = Number(process.env.PORT) || 3751;
 const IS_DEV = process.env.NODE_ENV === "development" || process.argv.includes("--watch");
 const PLUGIN_WATCH_EXTS = [".rssany.js", ".rssany.ts"];
@@ -90,7 +88,6 @@ async function main(): Promise<void> {
   await initSites();
   await initScheduler(CACHE_DIR);
   await initTopicsScheduler(TOPIC_TASK_BASE_DIR);
-  initEmailScheduler();
   const app = createApp();
   const server = serve({ fetch: app.fetch, port: PORT, hostname: "0.0.0.0" });
   server.setMaxListeners(32);

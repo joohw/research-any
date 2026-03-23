@@ -12,7 +12,7 @@
 | 运行时     | Node.js >= 20，ESM 模块                            |
 | 语言      | TypeScript（严格模式）                                |
 | HTTP 框架 | Hono + @hono/node-server                        |
-| 数据库     | better-sqlite3（SQLite，同步 API）                   |
+| 数据库     | Supabase（PostgreSQL，`@supabase/supabase-js`）      |
 | 浏览器自动化  | puppeteer-core                                  |
 | HTML 解析 | node-html-parser / jsdom / @mozilla/readability |
 | LLM     | OpenAI SDK（兼容任意 OpenAI 格式接口）                    |

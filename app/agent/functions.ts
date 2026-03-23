@@ -1,7 +1,7 @@
 // 纯函数实现：Agent 与 MCP 共用，包装后才是 tools
 
 import { readFile, writeFile, readdir, stat, mkdir } from "node:fs/promises";
-import { resolveSandboxPath, SANDBOX_DIR } from "../config/paths.js";
+import { resolveUserAgentSandboxPath, userAgentSandboxRoot } from "../config/paths.js";
 import { getAllChannelConfigs, collectAllSourceRefs } from "../core/channel/index.js";
 import { getItemById, queryItems } from "../db/index.js";
 import { getAllSources } from "../scraper/subscription/index.js";
@@ -352,11 +352,12 @@ export interface ReadFileSandboxArgs {
   limit?: number;
 }
 
-/** sandbox action=read：读取沙箱内文件；path 相对 .rssany/sandbox，可选 offset/limit 按行截取。 */
-export async function readFileSandbox(args: ReadFileSandboxArgs): Promise<
-  { content: string; path: string } | { error: string }
-> {
-  const resolved = resolveSandboxPath(args.path);
+/** sandbox action=read：读取当前用户 Agent 目录内文件；path 相对 .rssany/sandbox/agent/{userId}。 */
+export async function readFileSandbox(
+  args: ReadFileSandboxArgs,
+  userId: string,
+): Promise<{ content: string; path: string } | { error: string }> {
+  const resolved = resolveUserAgentSandboxPath(userId, args.path);
   if ("error" in resolved) return { error: resolved.error };
   try {
     const enc = (args.encoding ?? "utf-8") as BufferEncoding;
@@ -386,11 +387,12 @@ export interface WriteFileSandboxArgs {
   create_dirs?: boolean;
 }
 
-/** sandbox action=write：写入沙箱内文件；path 相对 .rssany/sandbox，存在则覆盖。 */
-export async function writeFileSandbox(args: WriteFileSandboxArgs): Promise<
-  { path: string } | { error: string }
-> {
-  const resolved = resolveSandboxPath(args.path);
+/** sandbox action=write：写入当前用户 Agent 目录；path 相对 .rssany/sandbox/agent/{userId}。 */
+export async function writeFileSandbox(
+  args: WriteFileSandboxArgs,
+  userId: string,
+): Promise<{ path: string } | { error: string }> {
+  const resolved = resolveUserAgentSandboxPath(userId, args.path);
   if ("error" in resolved) return { error: resolved.error };
   try {
     if (args.create_dirs !== false) {
@@ -412,11 +414,12 @@ export interface ReplaceInFileSandboxArgs {
   replace_all?: number;
 }
 
-/** sandbox action=replace：沙箱文件内字面量替换；默认 old_string 全文唯一匹配，replace_all=1 替换全部 */
-export async function replaceInFileSandbox(args: ReplaceInFileSandboxArgs): Promise<
-  { path: string; replaced_count: number } | { error: string }
-> {
-  const resolved = resolveSandboxPath(args.path);
+/** sandbox action=replace：当前用户 Agent 目录内文件字面量替换。 */
+export async function replaceInFileSandbox(
+  args: ReplaceInFileSandboxArgs,
+  userId: string,
+): Promise<{ path: string; replaced_count: number } | { error: string }> {
+  const resolved = resolveUserAgentSandboxPath(userId, args.path);
   if ("error" in resolved) return { error: resolved.error };
   const oldStr = args.old_string;
   if (!oldStr.length) return { error: "old_string 不能为空" };
@@ -467,12 +470,13 @@ export interface ListDirectoryEntry {
   path: string;
 }
 
-/** sandbox action=list：列出沙箱内目录；path 相对 .rssany/sandbox，默认 "."。 */
-export async function listDirectorySandbox(args: ListDirectorySandboxArgs): Promise<
-  { entries: ListDirectoryEntry[]; root: string } | { error: string }
-> {
+/** sandbox action=list：列出当前用户 Agent 目录；path 相对该用户根，默认 "."。 */
+export async function listDirectorySandbox(
+  args: ListDirectorySandboxArgs,
+  userId: string,
+): Promise<{ entries: ListDirectoryEntry[]; root: string } | { error: string }> {
   const subPath = (args.path ?? ".").replace(/\\/g, "/").trim() || ".";
-  const resolved = resolveSandboxPath(subPath);
+  const resolved = resolveUserAgentSandboxPath(userId, subPath);
   if ("error" in resolved) return { error: resolved.error };
   try {
     const info = await stat(resolved.absolute);
@@ -495,7 +499,7 @@ export async function listDirectorySandbox(args: ListDirectorySandboxArgs): Prom
     }
 
     await visit(resolved.absolute, subPath === "." ? "" : subPath);
-    return { entries, root: SANDBOX_DIR };
+    return { entries, root: userAgentSandboxRoot(userId) };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes("ENOENT")) return { error: "目录不存在" };

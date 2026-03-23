@@ -36,3 +36,8 @@ async function extractUserId(c: Context): Promise<string | null> {
     return null;
   }
 }
+
+/** 从请求解析当前用户 id，未登录返回 null（供需区分登录态的路由使用） */
+export async function getOptionalUserId(c: Context): Promise<string | null> {
+  return extractUserId(c);
+}

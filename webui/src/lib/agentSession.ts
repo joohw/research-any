@@ -1,4 +1,4 @@
-// 模块级 store：多会话聊天，当前会话 + 历史会话持久化到 localStorage
+// 模块级 store：多会话聊天；按登录用户隔离持久化到 localStorage（rssany_chat_sessions:{userId}）
 
 import { writable, get, derived } from 'svelte/store';
 
@@ -50,10 +50,15 @@ const initialStreamState: AgentStreamState = {
   lastUsage: undefined,
 };
 
-const STORAGE_KEY = 'rssany_chat_sessions';
+/** 旧版全局 key（迁移到首个登录用户的分桶 key） */
+const STORAGE_KEY_LEGACY = 'rssany_chat_sessions';
 const LEGACY_KEY = 'MainSession';
 const MAX_SESSIONS = 50;
 const TITLE_MAX_LEN = 36;
+
+function chatStorageKeyForUser(userId: string): string {
+  return `${STORAGE_KEY_LEGACY}:${userId}`;
+}
 
 function genId(): string {
   return crypto.randomUUID?.() ?? `s${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -71,18 +76,85 @@ interface StoredState {
   sessions: Record<string, ChatSession>;
 }
 
-function loadFromStorage(): StoredState {
+function emptyStoredState(): StoredState {
+  const id = genId();
+  const now = Date.now();
+  return {
+    currentId: id,
+    sessions: { [id]: { id, title: '新对话', messages: [], createdAt: now, updatedAt: now } },
+  };
+}
+
+/** 当前登录用户 id；null 表示未登录或未初始化，不落盘 */
+let activeUserId: string | null = null;
+
+/** 与 setAgentSessionUser 同步，供 UI 判断可否对话 */
+export const agentSessionUserId = writable<string | null>(null);
+
+/** 是否已完成至少一次与后端的会话用户同步（避免未就绪时误用旧全局缓存） */
+export const agentSessionReady = writable(false);
+
+let authSyncInFlight: Promise<void> | null = null;
+
+/** 从 /api/auth/me 同步当前用户并加载该用户的会话存档；并发调用共享同一请求 */
+export function syncAgentSessionFromApi(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  if (!authSyncInFlight) {
+    authSyncInFlight = (async () => {
+      try {
+        const res = await fetch('/api/auth/me', { credentials: 'include' });
+        if (res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { user?: { id?: string } };
+          const id = data?.user?.id;
+          setAgentSessionUser(typeof id === 'string' ? id : null);
+        } else {
+          setAgentSessionUser(null);
+        }
+      } catch {
+        setAgentSessionUser(null);
+      } finally {
+        agentSessionReady.set(true);
+      }
+    })();
+    void authSyncInFlight.finally(() => {
+      authSyncInFlight = null;
+    });
+  }
+  return authSyncInFlight;
+}
+
+function parseStoredState(raw: string): StoredState | null {
+  try {
+    const parsed = JSON.parse(raw) as StoredState;
+    if (parsed?.currentId && parsed?.sessions && typeof parsed.sessions === 'object') return parsed;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * 读取某用户的会话存档；支持从旧全局 key / MainSession 迁移到分桶 key。
+ */
+function loadFromStorageForUser(userId: string): StoredState {
   if (typeof localStorage === 'undefined') {
-    const id = genId();
-    return { currentId: id, sessions: { [id]: { id, title: '新对话', messages: [], createdAt: Date.now(), updatedAt: Date.now() } } };
+    return emptyStoredState();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as StoredState;
-      if (parsed?.currentId && parsed?.sessions && typeof parsed.sessions === 'object') return parsed;
+    const scoped = localStorage.getItem(chatStorageKeyForUser(userId));
+    if (scoped) {
+      const parsed = parseStoredState(scoped);
+      if (parsed) return parsed;
     }
-    // 迁移旧版 MainSession
+    const legacyFlat = localStorage.getItem(STORAGE_KEY_LEGACY);
+    if (legacyFlat) {
+      const parsed = parseStoredState(legacyFlat);
+      if (parsed) {
+        localStorage.removeItem(STORAGE_KEY_LEGACY);
+        localStorage.setItem(chatStorageKeyForUser(userId), legacyFlat);
+        return parsed;
+      }
+    }
     const legacy = localStorage.getItem(LEGACY_KEY);
     let messages: AgentMessage[] = [];
     if (legacy) {
@@ -103,17 +175,19 @@ function loadFromStorage(): StoredState {
       createdAt: now,
       updatedAt: now,
     };
-    return { currentId: id, sessions: { [id]: session } };
+    const state: StoredState = { currentId: id, sessions: { [id]: session } };
+    localStorage.setItem(chatStorageKeyForUser(userId), JSON.stringify(state));
+    return state;
   } catch {
-    const id = genId();
-    return { currentId: id, sessions: { [id]: { id, title: '新对话', messages: [], createdAt: Date.now(), updatedAt: Date.now() } } };
+    return emptyStoredState();
   }
 }
 
-function saveToStorage(state: StoredState): void {
-  if (typeof localStorage === 'undefined') return;
+function saveToStorage(state: StoredState, userId: string | null): void {
+  if (typeof localStorage === 'undefined' || !userId) return;
   try {
-    const sessions = state.sessions;
+    let nextState = state;
+    const sessions = nextState.sessions;
     const ids = Object.keys(sessions);
     if (ids.length > MAX_SESSIONS) {
       const sorted = ids
@@ -122,20 +196,25 @@ function saveToStorage(state: StoredState): void {
       const toRemove = sorted.slice(MAX_SESSIONS).map((s) => s.id);
       const next: Record<string, ChatSession> = {};
       for (const id of ids) if (!toRemove.includes(id)) next[id] = sessions[id];
-      state = { ...state, sessions: next };
+      nextState = { ...nextState, sessions: next };
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(chatStorageKeyForUser(userId), JSON.stringify(nextState));
   } catch {
     /* ignore */
   }
 }
 
-const initialState = loadFromStorage();
+function flushPersistForUser(userId: string): void {
+  saveToStorage({ currentId: get(_currentId), sessions: get(_sessions) }, userId);
+}
+
+const initialState = emptyStoredState();
 const _currentId = writable<string>(initialState.currentId);
 const _sessions = writable<Record<string, ChatSession>>(initialState.sessions);
 const _messages = writable<AgentMessage[]>(initialState.sessions[initialState.currentId]?.messages ?? []);
 
 function persistCurrentSession(messages: AgentMessage[]): void {
+  if (!activeUserId) return;
   const id = get(_currentId);
   const sessions = get(_sessions);
   const session = sessions[id];
@@ -153,15 +232,47 @@ function persistCurrentSession(messages: AgentMessage[]): void {
     }));
   }
   const next = get(_sessions);
-  saveToStorage({ currentId: id, sessions: next });
+  saveToStorage({ currentId: id, sessions: next }, activeUserId);
 }
 
 _messages.subscribe((msgs) => {
   const id = get(_currentId);
   const sessions = get(_sessions);
-  if (!sessions[id]) return;
+  if (!activeUserId || !sessions[id]) return;
   persistCurrentSession(msgs);
 });
+
+/**
+ * 切换当前会话所属用户：切换前将旧用户状态落盘，再加载新用户存档。
+ * 未登录时清空内存中的会话且不再写入 localStorage。
+ */
+export function setAgentSessionUser(userId: string | null): void {
+  const prev = activeUserId;
+  if (prev === userId) {
+    agentSessionUserId.set(userId);
+    return;
+  }
+  if (prev && prev !== userId) {
+    flushPersistForUser(prev);
+  }
+  activeUserId = userId;
+  agentSessionUserId.set(userId);
+
+  if (!userId) {
+    agentStream.resetStream();
+    const id = genId();
+    const now = Date.now();
+    _currentId.set(id);
+    _sessions.set({ [id]: { id, title: '新对话', messages: [], createdAt: now, updatedAt: now } });
+    _messages.set([]);
+    return;
+  }
+
+  const state = loadFromStorageForUser(userId);
+  _currentId.set(state.currentId);
+  _sessions.set(state.sessions);
+  _messages.set(state.sessions[state.currentId]?.messages ?? []);
+}
 
 export const currentSessionId = {
   subscribe: _currentId.subscribe,
@@ -179,9 +290,11 @@ export const currentSession = derived(
   ([id, s]) => (id ? s[id] ?? null : null)
 );
 
+/** 从当前用户的 localStorage 重新加载（例如多标签页） */
 export function rehydrateAgentMessages(): void {
-  if (typeof localStorage === 'undefined') return;
-  const state = loadFromStorage();
+  const uid = activeUserId;
+  if (!uid || typeof localStorage === 'undefined') return;
+  const state = loadFromStorageForUser(uid);
   _currentId.set(state.currentId);
   _sessions.set(state.sessions);
   _messages.set(state.sessions[state.currentId]?.messages ?? []);
@@ -194,12 +307,12 @@ export const agentMessages = {
   get: () => get(_messages),
   clear: () => {
     _messages.set([]);
-    persistCurrentSession([]);
   },
 };
 
 /** 新建会话 */
 export function createNewSession(): string {
+  if (!activeUserId) return get(_currentId);
   agentStream.resetStream();
   const id = genId();
   const now = Date.now();
@@ -208,12 +321,13 @@ export function createNewSession(): string {
   _sessions.update((s) => ({ ...s, [id]: session }));
   _messages.set([]);
   const sessions = get(_sessions);
-  saveToStorage({ currentId: id, sessions });
+  saveToStorage({ currentId: id, sessions }, activeUserId);
   return id;
 }
 
 /** 切换到指定历史会话 */
 export function loadSession(id: string): void {
+  if (!activeUserId) return;
   const sessions = get(_sessions);
   const session = sessions[id];
   if (!session) return;
@@ -224,6 +338,7 @@ export function loadSession(id: string): void {
 
 /** 删除一条历史会话 */
 export function deleteSession(id: string): void {
+  if (!activeUserId) return;
   const current = get(_currentId);
   _sessions.update((s) => {
     const next = { ...s };
@@ -235,7 +350,7 @@ export function deleteSession(id: string): void {
     const nextId = Object.keys(sessions)[0];
     _currentId.set(nextId);
     _messages.set(sessions[nextId].messages ?? []);
-    saveToStorage({ currentId: nextId, sessions });
+    saveToStorage({ currentId: nextId, sessions }, activeUserId);
     return;
   }
   if (Object.keys(sessions).length === 0) {
@@ -246,10 +361,10 @@ export function deleteSession(id: string): void {
     _currentId.set(newId);
     _sessions.set(sessions);
     _messages.set([]);
-    saveToStorage({ currentId: newId, sessions });
+    saveToStorage({ currentId: newId, sessions }, activeUserId);
     return;
   }
-  saveToStorage({ currentId: current, sessions });
+  saveToStorage({ currentId: current, sessions }, activeUserId);
 }
 
 // 流式输出状态

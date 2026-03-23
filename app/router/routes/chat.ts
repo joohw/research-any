@@ -3,6 +3,7 @@
 import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { createFeedAgent } from "../../agent/index.js";
+import { requireAuth } from "../../auth/middleware.js";
 
 type HistoryMessage = {
   role: "user" | "assistant";
@@ -85,12 +86,13 @@ function toAgentMessages(messages: HistoryMessage[]): Array<{ role: string; cont
 }
 
 export function registerChatRoutes(app: Hono): void {
-  app.post("/api/chat/stream", async (c) => {
+  app.post("/api/chat/stream", requireAuth(), async (c) => {
     try {
       const body = await c.req.json<{ prompt?: string; messages?: HistoryMessage[] }>();
       const prompt = body?.prompt?.trim();
       if (!prompt) return c.json({ error: "prompt 不能为空" }, 400);
-      const agent = createFeedAgent();
+      const userId = c.get("userId") as string;
+      const agent = createFeedAgent({ userId });
       const history = Array.isArray(body?.messages) ? body.messages : [];
       if (history.length > 0) {
         agent.replaceMessages(toAgentMessages(history) as Parameters<typeof agent.replaceMessages>[0]);
@@ -102,7 +104,6 @@ export function registerChatRoutes(app: Hono): void {
         await send("start", {});
         // pi-ai 事件：text_delta=正文流，thinking_delta=推理流（需模型支持 reasoning，如 o1）
         agent.subscribe((e) => {
-          console.log("[chat/stream] agent event:", e.type, e.type === "message_update" ? (e.assistantMessageEvent as { type: string })?.type : "");
           if (e.type === "message_update") {
             const ev = e.assistantMessageEvent;
             if (ev.type === "text_delta") {
@@ -116,14 +117,11 @@ export function registerChatRoutes(app: Hono): void {
             send("tool_end", { toolCallId: e.toolCallId, toolName: e.toolName, isError: e.isError });
           } else if (e.type === "agent_end") {
             const usage = aggregateUsage(e.messages);
-            console.log("[chat/stream] agent_end messages:", JSON.stringify(e.messages?.map((m: { role: string; content: unknown }) => ({ role: m.role, contentType: typeof m.content, contentPreview: typeof m.content === "string" ? m.content.slice(0, 80) : JSON.stringify(m.content)?.slice(0, 80) }))));
             send("done", usage ? { usage } : {});
           }
         });
         try {
-          console.log("[chat/stream] prompt start, length=%d, history=%d", prompt.length, history.length);
           await agent.prompt(prompt);
-          console.log("[chat/stream] prompt done");
         } catch (err) {
           console.error("[chat/stream] prompt error:", err);
           send("error", { message: err instanceof Error ? err.message : String(err) });
