@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import FeedCard from '$lib/components/ui/FeedCard.svelte';
+  import { DEFAULT_DISPLAY_LNG } from '$lib/displayLng';
 
   interface ApiItem {
     url: string;
@@ -98,6 +99,7 @@
     const params = new URLSearchParams();
     params.set('limit', String(PAGE_SIZE));
     params.set('offset', String(offset));
+    params.set('lng', DEFAULT_DISPLAY_LNG);
     if (todayOnly) {
       const d = todayStr();
       params.set('since', d);

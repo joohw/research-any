@@ -8,6 +8,7 @@
   import FeedCard from '$lib/components/ui/FeedCard.svelte';
   import Loading from '$lib/components/ui/Loading.svelte';
   import { buildFeedsHref, parseFeedsFilters, type FeedsFilters } from '$lib/feedsUrl';
+  import { DEFAULT_DISPLAY_LNG } from '$lib/displayLng';
 
   interface FeedItem {
     guid?: string;
@@ -58,6 +59,7 @@
     if (filters.search) p.set('search', filters.search);
     if (filters.tags) p.set('tags', filters.tags);
     if (filters.days !== undefined && filters.days !== null) p.set('days', String(filters.days));
+    p.set('lng', DEFAULT_DISPLAY_LNG);
     const qs = p.toString();
     return qs ? location.origin + '/rss?' + qs : '';
   })();
@@ -78,6 +80,7 @@
     if (filters.days !== undefined && filters.days !== null) p.set('days', String(filters.days));
     p.set('limit', String(PAGE_SIZE));
     p.set('offset', String(offset));
+    p.set('lng', DEFAULT_DISPLAY_LNG);
     return '/api/items?' + p.toString();
   }
 
