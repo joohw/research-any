@@ -6,6 +6,7 @@
   import { goto, beforeNavigate } from '$app/navigation';
   import ArrowUp from 'lucide-svelte/icons/arrow-up';
   import FeedCard from '$lib/components/ui/FeedCard.svelte';
+  import FeedGroupOverlay from '$lib/components/ui/FeedGroupOverlay.svelte';
   import Loading from '$lib/components/ui/Loading.svelte';
   import { buildFeedsHref, parseFeedsFilters, type FeedsFilters } from '$lib/feedsUrl';
   import { DEFAULT_DISPLAY_LNG } from '$lib/displayLng';
@@ -49,6 +50,33 @@
   let showBackTop = false;
 
   let abortController: AbortController | null = null;
+
+  /** 同组浮层：主条目 + 全部同组，平铺展示完整字段 */
+  let overlayGroup: { primary: FeedItem; siblings: FeedItem[] } | null = null;
+
+  function mapFeedItemToOverlayRow(it: FeedItem) {
+    const ch = filters.channel || 'all';
+    return {
+      title: it.title ?? '',
+      link: it.link,
+      summary: it.summary,
+      author: it.author,
+      authors: it.authors?.map((a) => ({ name: a, href: feedsHref(ch, undefined, { author: a }) })),
+      pubDate: it.pubDate,
+      source: it._sourceRef ?? it._source ?? (filters.ref ?? undefined),
+      sourceHref: it._sourceRef
+        ? feedsHref(ch, undefined, { ref: it._sourceRef })
+        : filters.ref
+          ? feedsHref(ch, undefined, { ref: filters.ref })
+          : undefined,
+      authorHref:
+        it.author && !it.authors?.length ? feedsHref(ch, undefined, { author: it.author }) : undefined,
+    };
+  }
+
+  function rowsForOverlayGroup(group: { primary: FeedItem; siblings: FeedItem[] }) {
+    return [mapFeedItemToOverlayRow(group.primary), ...group.siblings.map(mapFeedItemToOverlayRow)];
+  }
 
   // RSS URL with the same query params as the current view (empty if no filters)
   $: rssUrl = (() => {
@@ -254,7 +282,10 @@
     return () => listEl?.removeEventListener('scroll', onListScroll);
   });
 
-  beforeNavigate(() => { abortLoad(); });
+  beforeNavigate(() => {
+    abortLoad();
+    overlayGroup = null;
+  });
   onDestroy(() => { abortLoad(); });
 
   // Sync filters from the URL; on change, update the tab title and reload the list
@@ -272,6 +303,7 @@
       filters.days !== next.days;
     filters = next;
     if (changed && hasAny) {
+      overlayGroup = null;
       const parts: string[] = [];
       if (next.channel) parts.push('Channel: ' + (next.channel === 'all' ? 'All' : next.channel));
       if (next.ref) parts.push('Ref: ' + next.ref);
@@ -327,6 +359,7 @@
             guid={group.primary.guid}
             onDelete={handleDeleteItem}
             siblings={group.siblings.map((s) => ({ title: s.title ?? '', link: s.link }))}
+            onExpandGroup={() => (overlayGroup = group)}
           />
         {/each}
         {#if hasMore}
@@ -343,6 +376,12 @@
     </div>
   </div>
 </div>
+
+<FeedGroupOverlay
+  open={overlayGroup !== null}
+  onClose={() => (overlayGroup = null)}
+  items={overlayGroup ? rowsForOverlayGroup(overlayGroup) : []}
+/>
 
 {#if hasFilters || showBackTop}
   <div class="fab-group">

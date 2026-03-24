@@ -368,7 +368,7 @@
   <title>Agent - {PRODUCT_NAME}</title>
 </svelte:head>
 
-<div class="agent-wrap">
+<div class="agent-wrap" class:agent-wrap--overlay={inOverlay}>
   <div class="agent-layout">
     <div class="agent-col">
     <!-- 浮层：不占文档流，全高覆盖主内容；透明遮罩仅用于点击关闭 -->
@@ -1087,6 +1087,16 @@
     padding: 0.5rem 0;
     border-radius: var(--radius-md, 8px);
     border: 1px solid var(--color-border-muted);
+  }
+  /** 浮层内消息区略窄，给用户/助手气泡各加少量水平内边距 */
+  .agent-wrap--overlay .msg.user {
+    padding-left: 0.65rem;
+    padding-right: 0.65rem;
+  }
+  .agent-wrap--overlay .msg.assistant {
+    box-sizing: border-box;
+    padding-left: 0.65rem;
+    padding-right: 0.65rem;
   }
   .msg-usage {
     font-size: 0.6875rem;

@@ -16,12 +16,19 @@ if ('_extend' in util) (util as any)._extend = Object.assign;
 const LOCAL_BACKEND = 'http://127.0.0.1:3751';
 const REMOTE_API = 'https://api.rssany.com';
 
-/** 根据请求 Host 决定后端：localhost / 127.0.0.1 / 局域网 IP（如 192.168.41.1xx）→ 本机；否则 → api.rssany.com */
+/**
+ * 根据请求 Host 决定后端。
+ * 本机开发：localhost / 127.0.0.1 / 局域网 / 常见本机别名（rssany、*.local）→ 127.0.0.1:3751。
+ * 注意：`allowedHosts` 含 `rssany` 时若此处走 REMOTE_API，浏览器会打到线上 api，本地登录 Cookie 无效，/me 会一直鉴权失败或表现为空白。
+ */
 function getApiOrigin(host: string | undefined): string {
   if (!host) return REMOTE_API;
   const h = host.split(':')[0].toLowerCase();
   if (h === 'localhost' || h === '127.0.0.1') return LOCAL_BACKEND;
-  // 局域网私有网段：10.x、172.16–31.x、192.168.x（含 192.168.41.1xx）
+  // 与 server.allowedHosts 对齐：本机 hosts / mDNS 常用名
+  if (h === 'rssany' || h.endsWith('.rssany')) return LOCAL_BACKEND;
+  if (h.endsWith('.local')) return LOCAL_BACKEND;
+  // 局域网私有网段：10.x、172.16–31.x、192.168.x
   if (/^10\.|^172\.(1[6-9]|2[0-9]|3[01])\.|^192\.168\./.test(h)) return LOCAL_BACKEND;
   return REMOTE_API;
 }

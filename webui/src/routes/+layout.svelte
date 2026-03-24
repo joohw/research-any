@@ -24,8 +24,6 @@
     void syncAgentSessionFromApi();
   });
 
-  $: isFeedsRoute = $page.url.pathname === '/feeds';
-
   function closeAgentOverlay() {
     agentOverlayOpen.set(false);
   }
@@ -101,7 +99,7 @@
       </div>
     </header>
     <div id="layout-inner-scroll" class="layout-inner">
-      <main class="main" class:main-feeds={isFeedsRoute}>
+      <main class="main">
         <slot />
       </main>
     </div>
@@ -287,12 +285,9 @@
     max-width: var(--feeds-column-max);
     margin-left: auto;
     margin-right: auto;
-  }
-  .main-feeds {
     display: flex;
     flex-direction: column;
   }
-
   /* 小窗 + 四周等距留白 + 背景模糊衬底；中间卡片略窄于信息流栏宽 */
   .agent-me-overlay {
     --shell-gutter: clamp(0.75rem, 2.5vw, 1.5rem);

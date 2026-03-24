@@ -1,31 +1,37 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
-  import { resetMeStores, setMeUserFromAuthBody } from '$lib/meAreaStore';
+  import { get } from 'svelte/store';
+  import { meUser, setMeUserFromAuthBody } from '$lib/meAreaStore';
+  import { clearMeSessionAndRedirectHome, redirectIfUnauthorizedResponse } from '$lib/meAuthSession';
 
   /**
    * 鉴权只放在 /me 子树：根布局始终挂顶栏。
-   * 首次进入 /me 时校验；在 /me 内跳转时本 layout 不卸载，ready 保持 true，顶栏不会「刷新」。
-   * 同时将用户信息写入 meUser，供子页面复用，避免重复请求 /api/auth/me。
+   * 已有 meUser 缓存时先展示，再在后台请求 `/api/auth/me`；401/403 清状态回首页。
+   * 在 /me 内跳转时本 layout 不卸载，ready 保持 true。
    */
   let ready = false;
 
   onMount(async () => {
+    const hadCached = get(meUser).loaded && !!get(meUser).user;
+    if (hadCached) ready = true;
+
     try {
       const res = await fetch('/api/auth/me', { credentials: 'include' });
+      if (await redirectIfUnauthorizedResponse(res)) return;
+
       if (!res.ok) {
-        resetMeStores();
-        await goto('/', { replaceState: true });
+        if (hadCached) return;
+        await clearMeSessionAndRedirectHome();
         return;
       }
+
       const data = await res.json();
       setMeUserFromAuthBody(data);
+      ready = true;
     } catch {
-      resetMeStores();
-      await goto('/', { replaceState: true });
-      return;
+      if (hadCached) return;
+      await clearMeSessionAndRedirectHome();
     }
-    ready = true;
   });
 </script>
 
@@ -34,7 +40,9 @@
     <slot />
   </div>
 {:else}
-  <div class="me-auth-pending" aria-busy="true"></div>
+  <div class="me-auth-pending" aria-busy="true" aria-live="polite">
+    <span class="me-auth-pending-text">加载账户…</span>
+  </div>
 {/if}
 
 <style>
@@ -51,5 +59,14 @@
     flex: 1;
     min-height: 12rem;
     min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-muted-foreground);
+    font-size: 0.8125rem;
+  }
+
+  .me-auth-pending-text {
+    padding: 0.5rem 0;
   }
 </style>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { PRODUCT_NAME } from '$lib/brand';
+  import { redirectIfUnauthorizedResponse } from '$lib/meAuthSession';
   import { onMount } from 'svelte';
 
   interface UserChannel {
@@ -15,7 +16,6 @@
   let saveMsg = '';
   let loading = true;
   let saving = false;
-  let unauthorized = false;
 
   $: dirty = content !== original;
   $: canSave = !error && dirty && !saving;
@@ -39,13 +39,9 @@
 
   async function load() {
     loading = true;
-    unauthorized = false;
     try {
       const res = await fetch('/api/user/channels');
-      if (res.status === 401) {
-        unauthorized = true;
-        return;
-      }
+      if (await redirectIfUnauthorizedResponse(res)) return;
       const data: UserChannel[] = await res.json();
       const formatted = JSON.stringify(Array.isArray(data) ? data : [], null, 2);
       content = formatted;
@@ -69,10 +65,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channels }),
       });
-      if (res.status === 401) {
-        unauthorized = true;
-        return;
-      }
+      if (await redirectIfUnauthorizedResponse(res)) return;
       const result = await res.json();
       if (!result.ok) throw new Error(result.message || '保存失败');
       const body = JSON.stringify(channels, null, 2);
@@ -128,8 +121,7 @@
           每个频道可绑定多个信源，用于首页信息流分组。格式：<code>[&#123; "id", "title", "sourceRefs": ["url"] &#125;]</code>
         </p>
       </div>
-      {#if !unauthorized}
-        <div class="header-actions">
+      <div class="header-actions">
           <button class="btn btn-secondary" on:click={format} disabled={!!error || loading}>
             格式化
           </button>
@@ -137,16 +129,10 @@
             {saving ? '保存中…' : '保存'}
           </button>
         </div>
-      {/if}
     </div>
 
     {#if loading}
       <div class="state">加载中…</div>
-    {:else if unauthorized}
-      <div class="state unauth">
-        <p>需要登录才能管理个人频道</p>
-        <a class="btn btn-primary" href="/?next=/me/channels" style="text-decoration:none;margin-top:0.75rem;">去登录</a>
-      </div>
     {:else}
       <div class="editor-wrap" class:has-error={!!error}>
         <textarea
@@ -160,8 +146,7 @@
       </div>
     {/if}
 
-    {#if !unauthorized}
-      <div class="footer">
+    <div class="footer">
         {#if error}
           <span class="msg error">✗ {error}</span>
         {:else if saveMsg}
@@ -174,7 +159,6 @@
           <span class="msg hint">已同步</span>
         {/if}
       </div>
-    {/if}
   </div>
 </div>
 
@@ -315,11 +299,6 @@
     padding: 4rem;
     color: #aaa;
     font-size: 0.875rem;
-  }
-  .state.unauth {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
   }
 
   @media (max-width: 600px) {

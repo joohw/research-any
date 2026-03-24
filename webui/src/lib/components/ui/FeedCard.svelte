@@ -19,13 +19,32 @@
   /** 同组其他条目（同一天同一 ref 的聚合），由前端 groupItemsByDateAndRef 计算；后端只返回扁平列表，与收起/展开无关 */
   export let siblings: { title: string; link: string }[] = [];
 
+  /**
+   * 有同组条目时由页面在外部浮层展示可跳转的完整列表（如 /feeds）。
+   * 列表内同组标题不可跳转，仅点击「展开」后在浮层内打开链接。
+   * 未传入时：列表内为纯预览，展开后在当前卡片内显示可点击链接。
+   */
+  export let onExpandGroup: (() => void) | undefined = undefined;
+
   /** 收起时最多展示条数，展开后显示全部；纯前端逻辑，某些来源条目很多时也由前端控制展示 */
   const SIBLINGS_LIMIT = 12;
   let siblingsExpanded = false;
 
-  $: visibleSiblings = siblingsExpanded ? siblings : siblings.slice(0, SIBLINGS_LIMIT);
-  $: hasMoreSiblings = siblings.length > SIBLINGS_LIMIT;
-  $: hiddenCount = siblings.length - SIBLINGS_LIMIT;
+  $: useGroupOverlay = typeof onExpandGroup === 'function';
+
+  $: visibleSiblings = useGroupOverlay
+    ? siblings.slice(0, SIBLINGS_LIMIT)
+    : siblingsExpanded
+      ? siblings
+      : siblings.slice(0, SIBLINGS_LIMIT);
+
+  function toggleExpand() {
+    if (useGroupOverlay) {
+      onExpandGroup?.();
+    } else {
+      siblingsExpanded = !siblingsExpanded;
+    }
+  }
 
   let ctxMenu = { show: false, x: 0, y: 0 };
 
@@ -77,17 +96,19 @@
   {#if siblings && siblings.length > 0}
     <div class="item-siblings">
       {#each visibleSiblings as s}
-        <a class="item-sibling-link" href={s.link} target="_blank" rel="noopener">{s.title || '(无标题)'}</a>
+        {#if useGroupOverlay || !siblingsExpanded}
+          <span class="item-sibling-text">{s.title || '(无标题)'}</span>
+        {:else}
+          <a class="item-sibling-link" href={s.link} target="_blank" rel="noopener">{s.title || '(无标题)'}</a>
+        {/if}
       {/each}
-      {#if hasMoreSiblings}
-        <button
-          type="button"
-          class="item-siblings-expand"
-          on:click={() => (siblingsExpanded = !siblingsExpanded)}
-        >
-          {siblingsExpanded ? '收起' : `展开 ${hiddenCount} 条`}
-        </button>
-      {/if}
+      <button type="button" class="item-siblings-expand" on:click={toggleExpand}>
+        {#if !useGroupOverlay && siblingsExpanded}
+          收起
+        {:else}
+          展开共 {1 + siblings.length} 条
+        {/if}
+      </button>
     </div>
   {/if}
   <div class="item-meta">
@@ -238,6 +259,7 @@
     line-height: 1.55;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
     margin-bottom: 0.4rem;
@@ -251,6 +273,18 @@
     padding-top: 0.35rem;
     border-top: 1px dashed var(--color-border-muted);
   }
+  .item-sibling-text {
+    font-size: 0.8rem;
+    color: var(--color-muted-foreground);
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    cursor: default;
+    user-select: text;
+  }
   .item-sibling-link {
     font-size: 0.8rem;
     color: var(--color-muted-foreground);
@@ -258,6 +292,7 @@
     line-height: 1.4;
     display: -webkit-box;
     -webkit-line-clamp: 1;
+    line-clamp: 1;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }

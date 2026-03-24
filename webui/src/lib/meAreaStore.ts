@@ -64,6 +64,19 @@ export function setMeUserFromAuthBody(data: { user?: MeUser }) {
   setAgentSessionUser(typeof u?.id === 'string' ? u.id : null);
 }
 
+/** 资料等修改成功后调用，拉取最新 `/api/auth/me` 写入 store；失败返回 false（调用方可再 invalidate） */
+export async function refreshMeUserFromApi(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/auth/me', { credentials: 'include' });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { user?: MeUser };
+    setMeUserFromAuthBody(data);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 已加载则跳过（除非 force）。供 /me 首页与组件 onMount 调用，幂等。
  */
