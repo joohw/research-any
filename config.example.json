@@ -6,6 +6,10 @@
   "pipeline": {
     "steps": [
       {
+        "id": "qualityFilter",
+        "enabled": false
+      },
+      {
         "id": "tagger",
         "enabled": true
       },

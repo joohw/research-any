@@ -78,6 +78,21 @@ export interface FeedItem {
      * 由插件在 enrichItem 中写入，或由框架在 enrich 后统一调用翻译服务写入。
      */
     translations?: Record<string, ItemTranslationFields>;
-    /** 扩展字段，给插件留后门 */
+    /**
+     * 扩展字段，给插件留后门。
+     * 框架保留键：`_rssanyPipelineDrop` 为 true 表示 pipeline 质量过滤丢弃，feeder 会删库并移出 RSS。
+     */
     extra?: Record<string, unknown>;
   }
+
+/** Pipeline 质量过滤等步骤标记的丢弃键（写入 item.extra） */
+export const PIPELINE_DROP_EXTRA_KEY = "_rssanyPipelineDrop";
+
+export function markPipelineDrop(item: FeedItem): FeedItem {
+  item.extra = { ...item.extra, [PIPELINE_DROP_EXTRA_KEY]: true };
+  return item;
+}
+
+export function isPipelineDroppedItem(item: FeedItem): boolean {
+  return item.extra?.[PIPELINE_DROP_EXTRA_KEY] === true;
+}

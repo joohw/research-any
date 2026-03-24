@@ -6,6 +6,7 @@
  */
 
 import type { FeedItem } from "../types/feedItem.js";
+import { qualityFilterMatch, runQualityFilter } from "./qualityFilter.js";
 import { taggerMatch, runTagger } from "./tagger.js";
 import { translatorMatch, runTranslator } from "./translator.js";
 import { loadPipelineConfig } from "./config.js";
@@ -23,6 +24,7 @@ export interface PipelineContext {
 
 /** Pipeline 步骤注册表 */
 const STEP_REGISTRY: Record<string, { match: (item: FeedItem, ctx: PipelineContext) => boolean; run: (item: FeedItem, ctx: PipelineContext) => Promise<FeedItem> }> = {
+  qualityFilter: { match: qualityFilterMatch, run: runQualityFilter },
   tagger: { match: taggerMatch, run: runTagger },
   translator: { match: translatorMatch, run: runTranslator },
 };

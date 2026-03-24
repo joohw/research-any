@@ -10,6 +10,7 @@
   }
 
   const STEP_LABELS: Record<string, string> = {
+    qualityFilter: '质量过滤',
     tagger: '打标签',
     translator: '翻译',
   };

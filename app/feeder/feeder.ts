@@ -10,11 +10,10 @@ import { AuthRequiredError } from "../scraper/auth/index.js";
 import { buildRssXml } from "./rss.js";
 import type { RssChannel, RssEntry } from "./types.js";
 import type { FeedItem } from "../types/feedItem.js";
-import { normalizeAuthor } from "../types/feedItem.js";
-import { getEffectiveItemFields } from "../types/feedItem.js";
+import { normalizeAuthor, getEffectiveItemFields, isPipelineDroppedItem } from "../types/feedItem.js";
 import type { FeederConfig } from "./types.js";
 import type { SourceContext } from "../scraper/sources/types.js";
-import { upsertItems, updateItemContent, getExistingIds, getSystemTags } from "../db/index.js";
+import { upsertItems, updateItemContent, getExistingIds, getSystemTags, deleteItem } from "../db/index.js";
 import { emitFeedUpdated } from "../core/events/index.js";
 import { enrichQueue } from "../scraper/enrich/index.js";
 import { chatJson, chatText } from "../agent/llm.js";
@@ -123,6 +122,8 @@ async function generateAndCache(listUrl: string, key: string, config: FeederConf
     newIds = result.newIds;
   }
 
+  let pipelineDroppedNew = 0;
+
   const hasEnrich =
     source.enrichItem != null || items.some((i) => getMatchedEnrichPlugin(i, { sourceUrl: listUrl }));
   if (!includeContent || items.length === 0 || !hasEnrich) {
@@ -131,15 +132,22 @@ async function generateAndCache(listUrl: string, key: string, config: FeederConf
       const processed = await runPipelineOnItem(items[i], { sourceUrl: listUrl, isEnriched: false });
       items[i] = processed;
       if (config.writeDb) {
-        updateItemContent(processed).catch((err) =>
-          logger.warn("db", "updateItemContent 失败", { source_url: listUrl, err: err instanceof Error ? err.message : String(err) })
-        );
+        if (isPipelineDroppedItem(processed)) {
+          await deleteItem(processed.guid).catch((err) =>
+            logger.warn("db", "质量过滤后删除条目失败", { source_url: listUrl, err: err instanceof Error ? err.message : String(err) })
+          );
+          pipelineDroppedNew++;
+        } else {
+          updateItemContent(processed).catch((err) =>
+            logger.warn("db", "updateItemContent 失败", { source_url: listUrl, err: err instanceof Error ? err.message : String(err) })
+          );
+        }
       }
     }
     if (config.writeDb && newCount > 0) {
-      emitFeedUpdated({ sourceUrl: listUrl, newCount });
+      emitFeedUpdated({ sourceUrl: listUrl, newCount: newCount - pipelineDroppedNew });
     }
-    return { items };
+    return { items: items.filter((i) => !isPipelineDroppedItem(i)) };
   }
   const enrichFn = (item: FeedItem, _ctx: SourceContext) => buildEnrichFn(source, listUrl, ctx)(item);
   await enrichQueue.submit(
@@ -155,14 +163,24 @@ async function generateAndCache(listUrl: string, key: string, config: FeederConf
           : enrichedItem;
         items[index] = processed;
         if (config.writeDb) {
-          updateItemContent(processed).catch((err) =>
-            logger.warn("db", "updateItemContent 失败", { source_url: listUrl, err: err instanceof Error ? err.message : String(err) })
-          );
+          if (isPipelineDroppedItem(processed)) {
+            await deleteItem(processed.guid).catch((err) =>
+              logger.warn("db", "质量过滤后删除条目失败", { source_url: listUrl, err: err instanceof Error ? err.message : String(err) })
+            );
+            pipelineDroppedNew++;
+          } else {
+            updateItemContent(processed).catch((err) =>
+              logger.warn("db", "updateItemContent 失败", { source_url: listUrl, err: err instanceof Error ? err.message : String(err) })
+            );
+          }
         }
       },
       onAllDone: async () => {
+        for (let i = items.length - 1; i >= 0; i--) {
+          if (isPipelineDroppedItem(items[i])) items.splice(i, 1);
+        }
         if (config.writeDb && newCount > 0) {
-          emitFeedUpdated({ sourceUrl: listUrl, newCount });
+          emitFeedUpdated({ sourceUrl: listUrl, newCount: newCount - pipelineDroppedNew });
         }
       },
     },
@@ -280,6 +298,7 @@ export async function ingestFromGateway(
     return { ok: true, count: 0, newCount: 0, errors: errors.length > 0 ? errors : undefined };
   }
   let newCount = 0;
+  let pipelineDroppedNew = 0;
   if (writeDb) {
     const result = await upsertItems(newItems, sourceRef);
     newCount = result.newCount;
@@ -288,13 +307,26 @@ export async function ingestFromGateway(
         sourceUrl: sourceRef,
         isEnriched: !!item.content,
       });
-      await updateItemContent(processed).catch((err) =>
-        logger.warn("db", "Gateway updateItemContent 失败", { url: item.link, err: err instanceof Error ? err.message : String(err) })
-      );
+      if (isPipelineDroppedItem(processed)) {
+        await deleteItem(processed.guid).catch((err) =>
+          logger.warn("db", "Gateway 质量过滤后删除条目失败", { url: item.link, err: err instanceof Error ? err.message : String(err) })
+        );
+        pipelineDroppedNew++;
+      } else {
+        await updateItemContent(processed).catch((err) =>
+          logger.warn("db", "Gateway updateItemContent 失败", { url: item.link, err: err instanceof Error ? err.message : String(err) })
+        );
+      }
     }
-    if (newCount > 0) {
-      emitFeedUpdated({ sourceUrl: sourceRef, newCount });
+    const effectiveNew = newCount - pipelineDroppedNew;
+    if (effectiveNew > 0) {
+      emitFeedUpdated({ sourceUrl: sourceRef, newCount: effectiveNew });
     }
   }
-  return { ok: true, count: newItems.length, newCount, errors: errors.length > 0 ? errors : undefined };
+  return {
+    ok: true,
+    count: newItems.length,
+    newCount: writeDb ? newCount - pipelineDroppedNew : newCount,
+    errors: errors.length > 0 ? errors : undefined,
+  };
 }

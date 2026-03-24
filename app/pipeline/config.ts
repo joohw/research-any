@@ -19,12 +19,13 @@ export interface PipelineConfig {
 
 /** 默认配置（入库前） */
 export const DEFAULT_PIPELINE_STEPS: PipelineStepConfig[] = [
+  { id: "qualityFilter", enabled: false },
   { id: "tagger", enabled: false },
   { id: "translator", enabled: false },
 ];
 
 /** 可用步骤 id */
-export const PIPELINE_STEP_IDS = ["tagger", "translator"] as const;
+export const PIPELINE_STEP_IDS = ["qualityFilter", "tagger", "translator"] as const;
 
 function parseSteps(rawSteps: unknown[]): PipelineStepConfig[] {
   const steps: PipelineStepConfig[] = [];
