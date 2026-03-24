@@ -267,13 +267,18 @@
   }
   .item-siblings-expand {
     margin-top: 0.2rem;
-    padding: 0.2rem 0.5rem;
+    margin-left: 0;
+    padding: 0.35rem 0;
     font-size: 0.75rem;
     color: var(--color-primary);
     background: transparent;
     border: none;
     cursor: pointer;
-    align-self: flex-start;
+    align-self: stretch;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: left;
+    font-family: inherit;
   }
   .item-siblings-expand:hover {
     text-decoration: underline;
