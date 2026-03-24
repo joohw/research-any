@@ -504,14 +504,16 @@
           {:else if !$agentSessionUserId}
             <p class="agent-empty-title">需要登录</p>
             <p class="agent-empty-desc">
-              Agent 对话与沙箱文件按账号隔离保存。请先登录后再使用。
+             请先登录后再使用
             </p>
             <p class="agent-empty-login">
               <a href="/login?next=/feeds" class="agent-empty-login-link">去登录</a>
             </p>
           {:else}
           <p class="agent-empty-title">NewsClaw</p>
-          <p class="agent-empty-desc">一只喜欢收集信源、研究资讯的龙虾。</p>
+          <p class="agent-empty-desc">
+            一只喜欢收集信源、研究资讯的龙虾
+          </p>
           <div class="quick-prompts">
             {#each QUICK_PROMPTS as prompt}
               <button type="button" class="quick-prompt" on:click={() => send(prompt)} disabled={streaming || !canUseChat}>{prompt}</button>
@@ -626,7 +628,7 @@
 <style>
   .agent-wrap {
     /* 继承 layout / overlay 的 --shell-gutter；聊天列略窄于 feeds 主列 */
-    --agent-chat-max: min(700px, calc(100vw - 2 * var(--shell-gutter, 1rem)));
+    --agent-chat-max: min(720px, calc(100vw - 2 * var(--shell-gutter, 1rem)));
     width: 100%;
     flex: 1;
     min-height: 0;
@@ -850,13 +852,14 @@
     row-gap: 0.35rem;
     pointer-events: auto;
   }
-  /* Overlay：全宽顶栏，左右等宽 flex，标题绝对居中 */
+  /* Overlay：全宽顶栏，左右等宽 flex，标题绝对居中；四向内边距一致，避免左右远大于上下 */
   .agent-header-inner-full {
     max-width: none;
     display: flex;
     align-items: center;
     gap: clamp(0.5rem, 2vw, 1rem);
     position: relative;
+    padding: 0.65rem;
   }
   .agent-header-inner-full .agent-header-actions {
     flex: 1 1 0;
@@ -1022,7 +1025,7 @@
     color: var(--color-muted-foreground);
     margin: 0 0 1.75rem;
     line-height: 1.75;
-    max-width: 24rem;
+    max-width: 28rem;
   }
   .agent-empty-login {
     margin: 0;
@@ -1075,11 +1078,13 @@
   .msg.user .msg-content {
     white-space: pre-wrap;
   }
+  /* 与 .msg.assistant 同列宽：不用负 margin 外扩；水平方向不额外缩进，保证与 AI 正文对齐 */
   .msg.user {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
     background: var(--color-muted);
-    margin-left: -0.5rem;
-    margin-right: -0.5rem;
-    padding: 0.5rem 0.75rem;
+    padding: 0.5rem 0;
     border-radius: var(--radius-md, 8px);
     border: 1px solid var(--color-border-muted);
   }

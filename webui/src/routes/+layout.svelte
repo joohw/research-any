@@ -36,7 +36,8 @@
 
   /** 未登录时与 /me 一致：最终到首页（见 me/+layout 鉴权跳转） */
   async function onAgentButtonClick() {
-    if (!get(agentSessionReady)) {
+    // 首次 /api/auth/me 失败时 ready 已为 true 但 userId 仍为 null；须重试，否则会误判未登录
+    if (!get(agentSessionReady) || get(agentSessionUserId) === null) {
       await syncAgentSessionFromApi();
     }
     if (get(agentSessionUserId) === null) {
@@ -82,8 +83,8 @@
           <button
             type="button"
             class="topbar-link {$agentOverlayOpen ? 'topbar-link-active' : ''}"
-            title="Ask"
-            aria-label="Ask"
+            title="NewsClaw"
+            aria-label="NewsClaw"
             aria-expanded={$agentOverlayOpen}
             aria-pressed={$agentOverlayOpen}
             on:click={onAgentButtonClick}
@@ -167,7 +168,7 @@
   .layout-outer {
     --shell-gutter: clamp(0.75rem, 2.5vw, 1.5rem);
     /* Same max width as main/feeds: fluid with viewport, soft cap for line length */
-    --feeds-column-max: min(960px, calc(100vw - 2 * var(--shell-gutter)));
+    --feeds-column-max: min(840px, calc(100vw - 2 * var(--shell-gutter)));
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
@@ -292,23 +293,39 @@
     flex-direction: column;
   }
 
+  /* 小窗 + 四周等距留白 + 背景模糊衬底；中间卡片略窄于信息流栏宽 */
   .agent-me-overlay {
     --shell-gutter: clamp(0.75rem, 2.5vw, 1.5rem);
-    --feeds-column-max: min(960px, calc(100vw - 2 * var(--shell-gutter)));
+    --feeds-column-max: min(840px, calc(100vw - 2 * var(--shell-gutter)));
+    --agent-overlay-inset: clamp(0.75rem, 2.2vw, 1.35rem);
+    box-sizing: border-box;
     position: fixed;
     inset: 0;
     z-index: 100;
     display: flex;
     flex-direction: column;
+    align-items: center;
     min-height: 0;
-    background: var(--color-background);
+    padding: var(--agent-overlay-inset);
     overflow: hidden;
+    background: rgba(0, 0, 0, 0.52);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
   }
   .agent-me-overlay-body {
+    /* 与顶栏上下边距同一量级，避免仅左右偏大导致图标区不协调 */
+    --shell-gutter: clamp(0.65rem, 1.8vw, 0.8rem);
+    width: 100%;
+    max-width: min(720px, 100%);
     flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    border-radius: var(--radius-lg, 12px);
+    background: var(--color-background);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--color-border) 80%, transparent),
+      0 25px 50px -12px rgba(0, 0, 0, 0.28);
   }
 </style>

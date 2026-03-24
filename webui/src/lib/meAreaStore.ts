@@ -1,7 +1,9 @@
 import { get, writable } from 'svelte/store';
 import { fetchJson } from '$lib/fetchJson.js';
+import { setAgentSessionUser } from '$lib/agentSession';
 
 export type MeUser = {
+  id?: string;
   email?: string;
   display_name?: string | null;
   provider?: string;
@@ -49,14 +51,17 @@ export const meDailyReports = writable<DailyReportsState>(initialDaily);
 export function resetMeStores() {
   meUser.set(initialUser);
   meDailyReports.set(initialDaily);
+  setAgentSessionUser(null);
 }
 
 export function setMeUserFromAuthBody(data: { user?: MeUser }) {
+  const u = data.user ?? null;
   meUser.set({
-    user: data.user ?? null,
+    user: u,
     loading: false,
     loaded: true,
   });
+  setAgentSessionUser(typeof u?.id === 'string' ? u.id : null);
 }
 
 /**
