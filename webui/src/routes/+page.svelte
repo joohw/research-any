@@ -6,9 +6,81 @@
   import { siGithub } from 'simple-icons';
   import { PRODUCT_NAME } from '$lib/brand';
 
+  /** 主标题固定前缀；后缀由打字机轮换 */
+  const HERO_PREFIX = '每天五分钟，';
+  const HERO_SLOGANS = ['跟上 AI 前沿', '了解最热产品', '看看最新论文'];
+
   type Step = 'email' | 'code';
 
   let step: Step = 'email';
+  let heroSuffixDisplay = '';
+  let heroTypewriterGen = 0;
+  let heroTypewriterTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearHeroTypewriter() {
+    heroTypewriterGen += 1;
+    if (heroTypewriterTimer) {
+      clearTimeout(heroTypewriterTimer);
+      heroTypewriterTimer = null;
+    }
+    heroSuffixDisplay = '';
+  }
+
+  function startHeroTypewriter() {
+    clearHeroTypewriter();
+    const gen = heroTypewriterGen;
+
+    if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      heroSuffixDisplay = HERO_SLOGANS[0] ?? '';
+      return;
+    }
+
+    let sloganIndex = 0;
+    let pos = 0;
+    type Phase = 'typing' | 'pause' | 'deleting';
+    let phase: Phase = 'typing';
+
+    const schedule = (fn: () => void, ms: number) => {
+      heroTypewriterTimer = setTimeout(() => {
+        if (gen !== heroTypewriterGen || step !== 'email') return;
+        fn();
+      }, ms);
+    };
+
+    const tick = () => {
+      if (gen !== heroTypewriterGen || step !== 'email') return;
+      const line = HERO_SLOGANS[sloganIndex % HERO_SLOGANS.length] ?? '';
+
+      if (phase === 'typing') {
+        if (pos < line.length) {
+          pos += 1;
+          heroSuffixDisplay = line.slice(0, pos);
+          schedule(tick, 68);
+        } else {
+          phase = 'pause';
+          schedule(() => {
+            phase = 'deleting';
+            tick();
+          }, 2400);
+        }
+        return;
+      }
+
+      if (phase === 'deleting') {
+        if (pos > 0) {
+          pos -= 1;
+          heroSuffixDisplay = line.slice(0, pos);
+          schedule(tick, 38);
+        } else {
+          sloganIndex = (sloganIndex + 1) % HERO_SLOGANS.length;
+          phase = 'typing';
+          tick();
+        }
+      }
+    };
+
+    tick();
+  }
   let email = '';
   let code = '';
   let loading = false;
@@ -36,12 +108,19 @@
       const msg = $page.url.searchParams.get('msg') ?? '登录失败';
       error = decodeURIComponent(msg);
     }
+
+    startHeroTypewriter();
   });
 
   onDestroy(() => {
     if (cooldownTimer) clearInterval(cooldownTimer);
     if (toastTimer) clearTimeout(toastTimer);
+    clearHeroTypewriter();
   });
+
+  $: if (step !== 'email') {
+    clearHeroTypewriter();
+  }
 
   function showToast(message: string, duration = 2200) {
     toast = message;
@@ -160,7 +239,7 @@
   <title>{PRODUCT_NAME}</title>
   <meta
     name="description"
-    content="{PRODUCT_NAME}：五分钟消除信息差。产品、论文、人物，你关心的 AI 资讯一网打尽；建议搭配浓缩咖啡。邮箱登录即可使用 Feeds、Agent 与订阅管理。"
+    content="{PRODUCT_NAME}：五分钟消除信息差。产品、论文、人物，你关心的 AI 资讯，在这里一网打尽；建议搭配浓缩咖啡。邮箱登录即可使用 Feeds、Agent 与订阅管理。"
   />
 </svelte:head>
 
@@ -204,8 +283,10 @@
 
   <main class="main">
     {#if step === 'email'}
-      <h1 class="title">每天五分钟，跟上 AI 前沿</h1>
-      <p class="desc">产品、论文、人物，你关心的 AI 资讯，我们帮你一网打尽</p>
+      <h1 class="title title-hero" aria-label="{HERO_PREFIX}{HERO_SLOGANS[0]}">
+        <span class="title-prefix">{HERO_PREFIX}</span><span class="title-typed">{heroSuffixDisplay}</span><span class="title-cursor" aria-hidden="true"></span>
+      </h1>
+      <p class="desc">产品、论文、人物，你关心的 AI 资讯，在这里一网打尽</p>
 
       {#if error}
         <div class="alert" role="alert">{error}</div>
@@ -265,6 +346,7 @@
             step = 'email';
             error = '';
             code = '';
+            startHeroTypewriter();
           }}
         >
           ← 更换邮箱
@@ -630,7 +712,7 @@
     align-items: center;
     justify-content: center;
     text-align: center;
-    max-width: 34rem;
+    max-width: 38rem;
     width: 100%;
     margin: 0 auto;
     gap: 1.25rem;
@@ -649,6 +731,63 @@
   .title-sm {
     font-size: clamp(1.75rem, 5vw, 2.25rem);
     font-weight: 600;
+  }
+
+  .title-hero {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    align-content: center;
+    justify-content: center;
+    gap: 0.05em 0.12em;
+    /* 与 .title line-height:1.2 一致，固定预留行高，避免打字换行时整块上下跳 */
+    min-height: calc(2 * 1.2em);
+    box-sizing: border-box;
+  }
+
+  @media (max-width: 480px) {
+    .title-hero {
+      min-height: calc(3 * 1.2em);
+    }
+  }
+
+  .title-prefix {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .title-typed {
+    display: inline-block;
+    min-height: 1.2em;
+  }
+
+  .title-cursor {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 0.07em;
+    min-width: 2px;
+    height: 0.82em;
+    margin-left: 0.04em;
+    vertical-align: -0.06em;
+    background: rgba(250, 250, 250, 0.78);
+    animation: title-cursor-blink 0.95s step-end infinite;
+  }
+
+  @keyframes title-cursor-blink {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .title-cursor {
+      animation: none;
+      opacity: 0.5;
+    }
   }
 
   .desc {
