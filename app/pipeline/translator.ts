@@ -5,12 +5,16 @@
  * 路由支持 lng=zh-CN 时可据此返回译文。
  *
  * 需要配置 OPENAI_API_KEY（或等效 LLM 环境变量）。
+ *
+ * 粗判已为中文的条目不调 LLM（省 token）；展示时 lng=zh-CN 无译文则回退原文。
  */
 
 import type { FeedItem } from "../types/feedItem.js";
 
 const ZH_CN = "zh-CN";
 const MAX_CONTENT_CHARS = 6000;
+/** 用于语言检测的正文上限（与 runTranslator 截断策略大致一致） */
+const DETECT_CONTENT_PREFIX = 2000;
 
 const SYSTEM = `你是一个专业翻译助手。将用户提供的英文（或其他语言）内容翻译为简体中文。
 - 保持专业、准确、流畅。
@@ -22,10 +26,36 @@ export interface TranslatorContext {
   llm?: { chatJson: (prompt: string, config?: unknown, opts?: { maxTokens?: number; debugLabel?: string }) => Promise<Record<string, unknown>> };
 }
 
-/** 跳过已有 zh-CN 译文的条目；无 LLM 则跳过 */
+function combinedTextForDetection(item: FeedItem): string {
+  const title = (item.title ?? "").trim();
+  const summary = (item.summary ?? item.content?.slice(0, 500) ?? "").trim();
+  const content = (item.content ?? "").trim().slice(0, DETECT_CONTENT_PREFIX);
+  return `${title}\n${summary}\n${content}`;
+}
+
+/**
+ * 粗判主体是否已是中文（汉字占比高），用于跳过 LLM。
+ * 含日文假名 / 韩文谚文时不视为「已是中文」，避免误跳日文/韩文条目。
+ */
+export function isLikelyChineseContent(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 8) return false;
+  if (/[\u3040-\u309f\u30a0-\u30ff]/.test(t)) return false;
+  if (/[\uac00-\ud7af]/.test(t)) return false;
+
+  const cjk = (t.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) ?? []).length;
+  const latin = (t.match(/[A-Za-z]/g) ?? []).length;
+  const letterish = cjk + latin;
+  if (letterish < 12) return false;
+  return cjk / letterish >= 0.55;
+}
+
+/** 跳过已有 zh-CN 译文、无 LLM、或粗判已为中文的条目 */
 export function translatorMatch(item: FeedItem, ctx: TranslatorContext): boolean {
   const hasZh = item.translations?.[ZH_CN];
-  return !hasZh && !!ctx.llm;
+  if (hasZh || !ctx.llm) return false;
+  if (isLikelyChineseContent(combinedTextForDetection(item))) return false;
+  return true;
 }
 
 export async function runTranslator(item: FeedItem, ctx: TranslatorContext): Promise<FeedItem> {
