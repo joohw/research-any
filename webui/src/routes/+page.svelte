@@ -167,12 +167,21 @@
 <div class="landing">
   <div class="landing-bg" aria-hidden="true">
     <div class="landing-bg-base"></div>
+    <div class="landing-bg-grid"></div>
     <div class="landing-bg-mesh"></div>
     <div class="landing-bg-blob landing-bg-blob--1"></div>
     <div class="landing-bg-blob landing-bg-blob--2"></div>
     <div class="landing-bg-blob landing-bg-blob--3"></div>
     <div class="landing-bg-shimmer"></div>
     <div class="landing-bg-vignette"></div>
+    <div class="landing-blueprint" aria-hidden="true">
+      <span class="bp-rule bp-rule--after-header"></span>
+      <span class="bp-rule bp-rule--before-footer"></span>
+      <div class="landing-blueprint-col">
+        <span class="bp-rule-v bp-rule-v--left"></span>
+        <span class="bp-rule-v bp-rule-v--right"></span>
+      </div>
+    </div>
   </div>
   {#if toast}
     <div class="toast" role="status" aria-live="polite">{toast}</div>
@@ -300,6 +309,31 @@
     position: absolute;
     inset: 0;
     background: #050508;
+  }
+
+  .landing-bg-grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.038) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.038) 1px, transparent 1px);
+    background-size: 52px 52px;
+    background-position: center -1px;
+    mask-image: radial-gradient(
+      ellipse 92% 78% at 50% 40%,
+      rgba(0, 0, 0, 0.5) 0%,
+      rgba(0, 0, 0, 0.92) 42%,
+      rgba(0, 0, 0, 0.28) 68%,
+      transparent 100%
+    );
+    -webkit-mask-image: radial-gradient(
+      ellipse 92% 78% at 50% 40%,
+      rgba(0, 0, 0, 0.5) 0%,
+      rgba(0, 0, 0, 0.92) 42%,
+      rgba(0, 0, 0, 0.28) 68%,
+      transparent 100%
+    );
+    opacity: 0.65;
   }
 
   .landing-bg-mesh {
@@ -457,6 +491,71 @@
     z-index: 1;
   }
 
+  .landing-blueprint {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+  }
+
+  .bp-rule {
+    position: absolute;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-top: 1px dashed rgba(255, 255, 255, 0.11);
+    box-sizing: border-box;
+    opacity: 0.75;
+  }
+
+  .bp-rule--after-header {
+    top: clamp(4.65rem, 6.5vh, 5.75rem);
+  }
+
+  .bp-rule--before-footer {
+    bottom: clamp(4.75rem, 9vh, 6.5rem);
+  }
+
+  .landing-blueprint-col {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(calc(100% - 2.5rem), 1100px);
+    top: 0;
+    bottom: 0;
+    pointer-events: none;
+  }
+
+  .bp-rule-v {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-left: 1px dashed rgba(255, 255, 255, 0.12);
+    box-sizing: border-box;
+    opacity: 0.85;
+  }
+
+  .bp-rule-v--left {
+    left: 0;
+  }
+
+  .bp-rule-v--right {
+    right: 0;
+    left: auto;
+    border-left: none;
+    border-right: 1px dashed rgba(255, 255, 255, 0.12);
+  }
+
   .toast {
     position: fixed;
     top: 1rem;
@@ -478,7 +577,7 @@
     max-width: 1100px;
     width: 100%;
     margin: 0 auto;
-    padding: 0.25rem 0 1rem;
+    padding: 0.25rem 1rem 1rem;
   }
 
   .top-row {
