@@ -1,7 +1,7 @@
 /**
  * Pipeline 配置：从 .rssany/config.json 的 pipeline 块读取
  *
- * 格式：{ "pipeline": { "steps": [{ "id": "tagger", "enabled": false }, ...] } }
+ * 格式：{ "pipeline": { "steps": [{ "id": "qualityFilter", "enabled": false }, ...] } }
  * - steps 数组顺序即执行顺序，enabled: false 的步骤跳过
  */
 
@@ -46,13 +46,22 @@ function parseSteps(rawSteps: unknown[]): PipelineStepConfig[] {
   return steps;
 }
 
-/** 读取 pipeline 配置，缺失时返回默认 */
+/** 与默认步骤表对齐：保证 JSON 里出现的步骤 id 齐全、顺序与默认一致，已有项保留 enabled */
+function mergeWithDefaultSteps(userSteps: PipelineStepConfig[]): PipelineStepConfig[] {
+  const map = new Map(userSteps.map((s) => [s.id, s]));
+  return DEFAULT_PIPELINE_STEPS.map((def) => {
+    const u = map.get(def.id);
+    return { id: def.id, enabled: u ? u.enabled : def.enabled };
+  });
+}
+
+/** 读取 pipeline 配置，缺失时返回默认；已存在的 config 会与默认步骤合并，使新步骤（如 qualityFilter）始终出现在列表中 */
 export async function loadPipelineConfig(): Promise<PipelineConfig> {
   try {
     const raw = await readFile(CONFIG_PATH, "utf-8");
     const parsed = JSON.parse(raw) as { pipeline?: { steps?: unknown[] } };
     const rawSteps = Array.isArray(parsed?.pipeline?.steps) ? parsed.pipeline.steps : [];
-    const steps = parseSteps(rawSteps);
+    const steps = mergeWithDefaultSteps(parseSteps(rawSteps));
     if (steps.length > 0) return { steps };
   } catch {
     // 文件不存在或解析失败
