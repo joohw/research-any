@@ -1,38 +1,13 @@
 // 内置 RSS/Atom/JSON Feed 插件：匹配 *rss*、*atom*、*.xml 等标准 Feed URL
 
-import Parser from "rss-parser";
-import { createHash } from "node:crypto";
-
 const UA = "RssAny/1.0 (+https://github.com/joohw/rssany)";
-const parser = new Parser({
-  timeout: 15_000,
-  headers: {
-    "User-Agent": UA,
-    Accept: "application/rss+xml,application/atom+xml,application/json,application/xml,text/xml,*/*",
-  },
-});
 
-function looksLikeFeed(url) {
-  const lower = url.toLowerCase();
-  return (
-    lower.includes("/feed") ||
-    lower.includes("/rss") ||
-    lower.includes("/atom") ||
-    lower.endsWith(".xml") ||
-    lower.endsWith(".rss") ||
-    lower.endsWith(".atom") ||
-    lower.includes("format=rss") ||
-    lower.includes("format=atom") ||
-    lower.includes("output=rss")
-  );
-}
-
-async function fetchFeed(url, proxy) {
-  const proxyToUse = proxy ?? process.env.HTTP_PROXY ?? process.env.HTTPS_PROXY;
+async function fetchFeed(url, ctx) {
+  const { deps } = ctx;
+  const proxyToUse = ctx.proxy ?? process.env.HTTP_PROXY ?? process.env.HTTPS_PROXY;
   if (proxyToUse) {
-    const { HttpsProxyAgent } = await import("https-proxy-agent");
-    const agent = new HttpsProxyAgent(proxyToUse);
-    const parserWithProxy = new Parser({
+    const agent = new deps.HttpsProxyAgent(proxyToUse);
+    const parserWithProxy = new deps.RssParser({
       timeout: 15_000,
       headers: {
         "User-Agent": UA,
@@ -42,6 +17,13 @@ async function fetchFeed(url, proxy) {
     });
     return parserWithProxy.parseURL(url);
   }
+  const parser = new deps.RssParser({
+    timeout: 15_000,
+    headers: {
+      "User-Agent": UA,
+      Accept: "application/rss+xml,application/atom+xml,application/json,application/xml,text/xml,*/*",
+    },
+  });
   return parser.parseURL(url);
 }
 
@@ -52,10 +34,11 @@ export default {
   priority: 20,
   refreshInterval: "1h",
   async fetchItems(sourceId, ctx) {
-    const feed = await fetchFeed(sourceId, ctx.proxy);
+    const { deps } = ctx;
+    const feed = await fetchFeed(sourceId, ctx);
     return (feed.items ?? []).map((item) => {
       const link = item.link ?? item.guid ?? sourceId;
-      const guid = item.guid ?? createHash("sha256").update(link).digest("hex");
+      const guid = item.guid ?? deps.createHash("sha256").update(link).digest("hex");
       const pubDate =
         item.pubDate != null
           ? new Date(item.pubDate)
@@ -81,3 +64,18 @@ export default {
     });
   },
 };
+
+function looksLikeFeed(url) {
+  const lower = url.toLowerCase();
+  return (
+    lower.includes("/feed") ||
+    lower.includes("/rss") ||
+    lower.includes("/atom") ||
+    lower.endsWith(".xml") ||
+    lower.endsWith(".rss") ||
+    lower.endsWith(".atom") ||
+    lower.includes("format=rss") ||
+    lower.includes("format=atom") ||
+    lower.includes("output=rss")
+  );
+}

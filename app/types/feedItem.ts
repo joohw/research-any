@@ -75,7 +75,7 @@ export interface FeedItem {
     sourceRef?: string;
     /**
      * 多语种译文。key 为 BCP 47（如 zh-CN、en），路由支持 lng 参数时可据此返回对应译文。
-     * 由插件在 enrichItem 中写入，或由框架在 enrich 后统一调用翻译服务写入。
+     * 由 pipeline（如 translator）写入。
      */
     translations?: Record<string, ItemTranslationFields>;
     /**

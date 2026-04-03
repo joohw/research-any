@@ -1,4 +1,4 @@
-// 插件加载器：从 plugins/{sources,enrich}/ 和 .rssany/plugins/{sources,enrich}/ 加载信源与 enrich 插件
+// 插件加载器：从 plugins/sources/ 和 .rssany/plugins/sources/ 加载信源与 Source 插件
 // pipeline 已移至 app/pipeline/ 作为固定流程，不再作为插件
 
 import { readdir } from "node:fs/promises";
@@ -9,13 +9,10 @@ import type { Source } from "../scraper/sources/types.js";
 import {
   BUILTIN_SOURCES_DIR,
   USER_SOURCES_DIR,
-  BUILTIN_ENRICH_DIR,
-  USER_ENRICH_DIR,
   BUILTIN_PLUGINS_DIR,
   USER_PLUGINS_DIR,
 } from "../config/paths.js";
 import { logger } from "../core/logger/index.js";
-import type { FeedItem } from "../types/feedItem.js";
 
 
 /** LLM 帮助函数，由 feeder 注入到插件上下文 */
@@ -32,7 +29,6 @@ export interface PluginDb {
 /** 插件统一上下文，由 feeder 在执行前注入 llm / db */
 export interface PluginContext {
   sourceUrl?: string;
-  isEnriched?: boolean;
   llm?: PluginLlm;
   db?: PluginDb;
   [key: string]: unknown;
@@ -41,24 +37,6 @@ export interface PluginContext {
 
 const PLUGIN_EXTENSIONS = [".rssany.js", ".rssany.ts"];
 
-
-/** Enrich 插件上下文（提供 fetchHtml、extractItem 等） */
-export interface EnrichContext {
-  cacheDir?: string;
-  headless?: boolean;
-  proxy?: string;
-  sourceUrl?: string;
-  fetchHtml(url: string, opts?: { waitMs?: number; purify?: boolean }): Promise<{ html: string; finalUrl: string; status: number }>;
-  extractItem(item: FeedItem, opts?: { cacheKey?: string }): Promise<FeedItem>;
-}
-
-/** Enrich 插件：对条目补全正文等 */
-export interface EnrichPlugin {
-  id: string;
-  match: (item: FeedItem, ctx: { sourceUrl?: string }) => boolean;
-  enrichItem: (item: FeedItem, ctx: EnrichContext) => Promise<FeedItem>;
-  priority?: number;
-}
 
 /** 判断对象是否为有效的 Site 实现 */
 function isValidSite(obj: unknown): obj is Site {
@@ -81,13 +59,6 @@ function isValidSource(obj: unknown): obj is Source {
     typeof s.fetchItems === "function" &&
     s.listUrlPattern === undefined
   );
-}
-
-/** 判断对象是否为有效的 EnrichPlugin */
-function isValidEnrichPlugin(obj: unknown): obj is EnrichPlugin {
-  if (obj == null || typeof obj !== "object") return false;
-  const p = obj as Record<string, unknown>;
-  return typeof p.id === "string" && typeof p.match === "function" && typeof p.enrichItem === "function";
 }
 
 /** 从单个目录加载 Site / Source 插件，并记录每个 Site / Source 的文件路径 */
@@ -127,41 +98,6 @@ async function loadSourcePluginsFromDir(
     }
   }
   return { siteEntries, sources };
-}
-
-
-/** 从单个目录加载指定类型插件 */
-async function loadPluginsFromDir<T>(
-  dir: string,
-  label: string,
-  validator: (obj: unknown) => obj is T,
-): Promise<T[]> {
-  const result: T[] = [];
-  let entries: { name: string; isFile: () => boolean }[];
-  try {
-    const raw = await readdir(dir, { withFileTypes: true, encoding: "utf-8" });
-    entries = raw as { name: string; isFile: () => boolean }[];
-  } catch {
-    return result;
-  }
-  for (const e of entries) {
-    const name = String(e.name);
-    if (!e.isFile()) continue;
-    if (!PLUGIN_EXTENSIONS.some((ext) => name.endsWith(ext))) continue;
-    const filePath = join(dir, name);
-    try {
-      const mod = await import(pathToFileURL(filePath).href);
-      const plugin = mod.default ?? mod;
-      if (validator(plugin)) {
-        result.push(plugin);
-      } else {
-        logger.warn("plugin", "插件接口不匹配，已跳过", { label, name });
-      }
-    } catch (err) {
-      logger.warn("plugin", "插件加载失败", { label, name, err: err instanceof Error ? err.message : String(err) });
-    }
-  }
-  return result;
 }
 
 
@@ -285,34 +221,3 @@ export async function loadSiteAndSourcePlugins(): Promise<{ sites: Site[]; sourc
   pathMap.forEach((path, id) => pluginSitePaths.set(id, path));
   return { sites: Array.from(siteMap.values()), sources: Array.from(sourceMap.values()) };
 }
-
-
-/** 已加载的 Enrich 插件（按 priority 排序） */
-export let registeredEnrichPlugins: EnrichPlugin[] = [];
-
-
-/** 加载 Enrich 插件 */
-export async function loadEnrichPlugins(): Promise<EnrichPlugin[]> {
-  const [builtin, user] = await Promise.all([
-    loadPluginsFromDir(BUILTIN_ENRICH_DIR, "builtin:enrich", isValidEnrichPlugin),
-    loadPluginsFromDir(USER_ENRICH_DIR, "user:enrich", isValidEnrichPlugin),
-  ]);
-  const merged = new Map<string, EnrichPlugin>();
-  for (const p of builtin) merged.set(p.id, p);
-  for (const p of user) {
-    if (merged.has(p.id)) logger.info("plugin", "用户 Enrich 插件覆盖同名内置", { pluginId: p.id });
-    merged.set(p.id, p);
-  }
-  const list = Array.from(merged.values());
-  list.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
-  registeredEnrichPlugins = list;
-  return list;
-}
-
-
-/** 根据条目获取匹配的 Enrich 插件（优先级最高者） */
-export function getMatchedEnrichPlugin(item: FeedItem, ctx: { sourceUrl?: string }): EnrichPlugin | undefined {
-  return registeredEnrichPlugins.find((p) => p.match(item, ctx));
-}
-
-

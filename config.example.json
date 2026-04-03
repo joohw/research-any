@@ -1,8 +1,4 @@
 {
-  "enrich": {
-    "concurrency": 3,
-    "maxRetries": 2
-  },
   "pipeline": {
     "steps": [
       {

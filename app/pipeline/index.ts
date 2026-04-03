@@ -14,7 +14,6 @@ import { logger } from "../core/logger/index.js";
 
 export interface PipelineContext {
   sourceUrl?: string;
-  isEnriched?: boolean;
   llm?: {
     chatJson: (prompt: string, config?: unknown, opts?: { maxTokens?: number; debugLabel?: string }) => Promise<Record<string, unknown>>;
     chatText: (prompt: string, config?: unknown, opts?: { maxTokens?: number; debugLabel?: string }) => Promise<string>;

@@ -38,7 +38,7 @@
 - 公共类型用 `interface` / `type`，放在同目录 `types.ts` 或与模块同文件（与现有模块一致即可）
 - 避免 `any`，优先 `unknown` 再收窄
 - 异步统一 `async/await`
-- 应用代码以**命名导出**为主；**插件**（`*.rssany.{js,ts}`）必须 **`export default`** 一个符合 `Site`（或 enrich 约定）的对象
+- 应用代码以**命名导出**为主；**插件**（`*.rssany.{js,ts}`）必须 **`export default`** 一个符合 `Site` 的对象
 
 ### 命名约定
 
@@ -65,7 +65,7 @@
 HTTP / 调度器 → feeder 协调
   → getSource() → fetchItems()（列表抓取与解析）
   → upsertItems()（写库、去重）
-  → [可选] enrich 队列 → pipeline（固定链，每条一次）→ updateItemContent()
+  → pipeline（固定链，每条一次）→ updateItemContent()
   → buildRssXml() / API 返回
   → deliver.url 出站 POST（非「外部推条目入站」）
 ```
@@ -74,7 +74,7 @@ HTTP / 调度器 → feeder 协调
 
 - 业务错误用自定义 `Error` 子类或明确错误码，在模块内定义
 - HTTP 层统一捕获并映射为合适状态码与 JSON
-- enrich 等后台任务失败以日志为主，不拖垮主拉取流程（与现有实现一致）
+- 抓取与 pipeline 失败以日志为主，不拖垮主流程（与现有实现一致）
 ---
 
 ## 测试约定

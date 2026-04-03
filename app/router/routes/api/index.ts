@@ -1,9 +1,8 @@
-// API 路由汇总：server、rss、items、feed、sources、enrich、scheduler、plugins、logs、admin、tags、tasks
+// API 路由汇总：server、rss、items、feed、sources、scheduler、plugins、logs、admin、tags、tasks
 
 import type { Hono } from "hono";
 import { registerServerRoutes } from "./server.js";
 import { registerRssApiRoutes } from "./rss.js";
-import { registerEnrichRoutes } from "./enrich.js";
 import { registerSchedulerRoutes } from "./scheduler.js";
 import { registerPluginsRoutes } from "./plugins.js";
 import { registerPipelineRoutes } from "./pipeline.js";
@@ -19,7 +18,6 @@ import { registerTasksRoutes } from "./tasks.js";
 export function registerApiRoutes(app: Hono): void {
   registerServerRoutes(app);
   registerRssApiRoutes(app);
-  registerEnrichRoutes(app);
   registerSchedulerRoutes(app);
   registerPluginsRoutes(app);
   registerPipelineRoutes(app);

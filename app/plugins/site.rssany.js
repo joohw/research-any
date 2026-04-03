@@ -10,17 +10,16 @@ export default {
   listUrlPattern: "https://example.com/{segment}",
   refreshInterval: "1day",
 
-  /** sourceId 与订阅里 ref 一致；ctx 含 fetchHtml、extractItem 等 */
+  /** sourceId 与订阅里 ref 一致；ctx 含 fetchHtml、extractItem、deps（parseHtml 等） */
   async fetchItems(sourceId, ctx) {
     const { html, finalUrl } = await ctx.fetchHtml(sourceId, {
       waitMs: 2000,
       purify: true,
     });
-    void html;
+    const root = ctx.deps.parseHtml(html);
+    void root;
     void finalUrl;
-    // TODO: 解析列表页 HTML，产出 { title, link, summary?, pubDate? } 等 FeedItem
+    // TODO: 用 ctx.deps.parseHtml 解析列表页，产出 { title, link, summary?, pubDate? } 等 FeedItem
     return [];
   },
-
-  // enrichItem: async (item, ctx) => ctx.extractItem(item),
 };

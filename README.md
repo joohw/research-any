@@ -11,7 +11,7 @@
 
 - **统一订阅**：在 `.rssany/sources.json` 中配置网站列表、标准 RSS、IMAP 邮件等，由调度器按 `refresh` 策略拉取。
 - **可插拔信源**：`plugins/sources/` 与 `.rssany/plugins/sources/` 中的 **Site** 插件（`.rssany.js` / `.rssany.ts`），自定义列表解析与详情规则。
-- **正文补全**：可选 **enrich** 插件拉全文；无 enrich 时入库后仍会跑 pipeline。
+- **正文与解析**：在信源 `fetchItems`（及需要的 `ctx.extractItem` 等）内完成；入库后跑 pipeline。
 - **固定 pipeline**：`app/pipeline/` 中打标签、翻译等，由 `.rssany/config.json` 的 `pipeline.steps` 开关（**不是**用户目录下的 pipeline 插件）。
 - **LLM 辅助**：解析、提取、标签、翻译等可按配置走 OpenAI 兼容接口。
 - **站点登录**：需登录的站点通过 Puppeteer 管理 Cookie（与产品用户账号无关）。
@@ -109,7 +109,6 @@ rssany
 sources.json / Site 插件
   → 调度器触发 fetchItems
   → upsertItems
-  → [可选] enrich 队列
   → pipeline（每条一次）
   → [可选] deliver.url POST（出站，非入站 API）
 ```
@@ -132,10 +131,6 @@ sources.json / Site 插件
 ### 信源插件（Site）
 
 放置于 `**plugins/sources/`** 或 `**.rssany/plugins/sources/**`，用户插件可与内置插件同 `id` 覆盖。最小约定包括 `id`、`listUrlPattern` 等（详见 `app/scraper/sources/web/site.ts`）。
-
-### Enrich 插件
-
-`**plugins/enrich/**`、`**.rssany/plugins/enrich/**`，按 enrich 管线加载。
 
 ### Pipeline（固定代码）
 
@@ -175,7 +170,7 @@ sources.json / Site 插件
 
 ```
 ├── app/                 # 后端：路由、feeder、scraper、pipeline、mcp、db、auth…
-├── plugins/             # 内置信源 / enrich 等插件
+├── plugins/             # 内置信源等插件
 └── webui/               # SvelteKit 前端
 
 ~/.rssany/               # 运行时用户数据（首次启动创建；或 RSSANY_USER_DIR）

@@ -1,49 +1,49 @@
-// ?????????????? SQLite ????????schema ?????????? FeedItem CRUD??????????????
+// SQLite 主库：建表 schema、FTS、FeedItem CRUD 与运行日志库
 
 import Database from "better-sqlite3";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, openSync, closeSync, writeSync, unlinkSync, readFileSync } from "node:fs";
-
-/** ??????????? WAL???? "delete" ??????? DELETE ??????? Windows ???????/???????????????????????? */
-const MAIN_DB_JOURNAL = (process.env.RSSANY_DB_JOURNAL ?? "wal").toLowerCase() === "delete" ? "DELETE" : "WAL";
 import type { FeedItem } from "../types/feedItem.js";
 import { normalizeAuthor } from "../types/feedItem.js";
 import type { LogEntry } from "../core/logger/types.js";
 import { DATA_DIR, TAGS_CONFIG_PATH } from "../config/paths.js";
 
+/** 主库日志模式：默认 WAL；环境变量 RSSANY_DB_JOURNAL=delete 时使用 DELETE（利于 Windows 下多进程/拷贝场景） */
+const MAIN_DB_JOURNAL = (process.env.RSSANY_DB_JOURNAL ?? "wal").toLowerCase() === "delete" ? "DELETE" : "WAL";
+
 let _db: Database.Database | null = null;
 
-/** ?????????????????????????/??????????????? getDb() ???????????? new Database() + initSchema????????????????????????????????????? SQLITE_CORRUPT_VTAB / database disk image is malformed????? */
+/** 懒初始化：并发调用 getDb() 时共用一个 Promise，避免重复 new Database() + initSchema；失败时清空以便重试。损坏时可能抛出 SQLITE_CORRUPT_VTAB / database disk image is malformed */
 let _dbInit: Promise<Database.Database> | null = null;
 
-/** ???????????????????? Enrich ?????????????????? updateItemContent/upsertItems ?????????????????????????? WAL ???????? transient ????????? */
+/** 单写者锁：串行化 updateItemContent/upsertItems 等写库，避免 WAL 下并发 transient 错误 */
 let _writeLock: Promise<void> = Promise.resolve();
 
-/** ???????????????????????????????????????????????????????? */
+/** 单进程锁文件路径：与 rssany.db 同目录，内容为 PID */
 const MAIN_DB_LOCK_PATH = join(DATA_DIR, "rssany.db.lock");
 
-/** ?? stderr ????????????????????????????????????????? db?? */
+/** 将损坏类错误写到 stderr，便于排查多进程/tsx watch 等导致的 db 问题 */
 function logCorruptDiagnostic(operation: string, err: unknown): void {
   const code = (err as { code?: string })?.code;
   const msg = err instanceof Error ? err.message : String(err);
   const lines = [
-    "[rssany db] ??????????????",
-    `  ?????: ${operation}`,
-    `  ????: ${code ?? "unknown"} - ${msg}`,
-    "  ????????:",
-    "    1. ??????/????????????????????????? tsx --watch ?????????????????????????????????????????????",
-    "    2. ???????????????????WAL ????? checkpoint",
-    "    3. ????/?????/?????????????????????????",
-    "  ??:",
-    "    - ??????????????? --watch???????????????????????????????",
-    "    - ???????????? RSSANY_DB_JOURNAL=delete ?????? DELETE ???????????????????",
-    "    - ?????? .rssany/data/rssany.db ????? -wal???-shm???rssany.db.lock ??????",
+    "[rssany db] 数据库可能损坏或并发冲突",
+    `  操作: ${operation}`,
+    `  错误: ${code ?? "unknown"} - ${msg}`,
+    "  常见原因:",
+    "    1. 多进程同时打开同一库（例如 tsx --watch 与另一实例同时写）",
+    "    2. 异常退出后 WAL 未正常 checkpoint",
+    "    3. 磁盘/杀毒/同步盘导致文件不完整",
+    "  建议:",
+    "    - 避免多实例同时写库；开发时慎用 --watch 与后台任务并行",
+    "    - 可尝试 RSSANY_DB_JOURNAL=delete 使用 DELETE 模式降低多文件依赖",
+    "    - 备份后删除 .rssany/data/rssany.db 及同目录 -wal、-shm、rssany.db.lock 再启动",
   ];
   process.stderr.write(lines.join("\n") + "\n");
 }
 
-/** ????????????????????????????????????????????????????????????????????????????????????? */
+/** 独占创建锁文件（wx）；若已存在则读 PID，旧进程已死则删除后重试 */
 function acquireDbLock(dbDir: string): void {
   const lockPath = join(dbDir, "rssany.db.lock");
   const pid = process.pid;
@@ -67,7 +67,7 @@ function acquireDbLock(dbDir: string): void {
       const n = parseInt(buf.trim(), 10);
       if (!Number.isNaN(n)) oldPid = n;
     } catch {
-      /* ????????????????????? */
+      /* 读锁文件失败则重试创建 */
     }
     if (oldPid !== null && oldPid !== pid) {
       const stillRunning = ((): boolean => {
@@ -80,7 +80,7 @@ function acquireDbLock(dbDir: string): void {
       })();
       if (stillRunning) {
         throw new Error(
-          `???????????????????????????PID ${oldPid}??????????? tsx --watch ?????????????????????????????????? ${lockPath} ??????????`
+          `数据库已被其他进程占用（PID ${oldPid}）。请勿多开实例；若确认无其他进程，可删除 ${lockPath} 后重试（常见于 tsx --watch 未退出）`,
         );
       }
     }
@@ -94,7 +94,7 @@ function acquireDbLock(dbDir: string): void {
   tryCreate();
 }
 
-/** ????????????????????????????????????????? */
+/** 进程退出时尝试删除锁文件（尽力而为） */
 function releaseDbLock(): void {
   if (!existsSync(MAIN_DB_LOCK_PATH)) return;
   try {
@@ -115,10 +115,12 @@ export function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
   _writeLock = prev
     .then(() => fn())
     .then(
-      (v) => { resolveOut(v); },
+      (v) => {
+        resolveOut(v);
+      },
       (e: unknown) => {
         if (isCorruptError(e)) {
-          logCorruptDiagnostic("???????????? updateItemContent/upsertItems??", e);
+          logCorruptDiagnostic("withWriteLock 内 updateItemContent/upsertItems 等", e);
         }
         rejectOut(e);
         throw e;
@@ -127,14 +129,13 @@ export function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
   return out;
 }
 
+/** 仅英文「日期当标题」的粗判（如 Jan 15, 2024），用于去重修复时跳过 */
 const DATE_ONLY_TITLE_RE =
-  /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b[\s\d,??./-]*(?:st|nd|rd|th)?[\s\d,??./-]*$/i;
-
+  /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b[\s\d,./-]*(?:st|nd|rd|th)?[\s\d,./-]*$/i;
 
 function normalizeText(text: string | null | undefined): string {
   return (text ?? "").replace(/\s+/g, " ").trim();
 }
-
 
 function isDateOnlyTitle(title: string | null | undefined): boolean {
   const normalized = normalizeText(title);
@@ -142,15 +143,13 @@ function isDateOnlyTitle(title: string | null | undefined): boolean {
   return DATE_ONLY_TITLE_RE.test(normalized);
 }
 
-
 function toMs(input: string | null | undefined): number | null {
   if (!input) return null;
   const ms = Date.parse(input);
   return Number.isNaN(ms) ? null : ms;
 }
 
-
-/** ?? DB ??? author ???????? string[]???????? JSON ???????????????????? */
+/** 将 DB 中 author 列（JSON 字符串或单字符串）解析为 string[] */
 export function parseAuthorFromDb(raw: string | null | undefined): string[] | undefined {
   if (!raw?.trim()) return undefined;
   try {
@@ -162,11 +161,15 @@ export function parseAuthorFromDb(raw: string | null | undefined): string[] | un
   }
 }
 
-/** ?? raw DB row ?? DbItem?????? author / tags / translations ?? JSON ????? */
+/** 将原始行转为 DbItem，并解析 author / tags / translations 等 JSON 字段 */
 function toDbItem(row: Record<string, unknown>): DbItem {
   const author = parseAuthorFromDb(row.author as string) ?? null;
   const parseJsonArr = (v: unknown): string[] | null => {
-    try { return v ? (JSON.parse(v as string) as string[]) : null; } catch { return null; }
+    try {
+      return v ? (JSON.parse(v as string) as string[]) : null;
+    } catch {
+      return null;
+    }
   };
   const tags = parseJsonArr(row.tags);
   let translations: Record<string, { title?: string; summary?: string; content?: string }> | null = null;
@@ -185,8 +188,7 @@ function mapRowsToDbItems(rows: Record<string, unknown>[]): DbItem[] {
   return rows.map(toDbItem);
 }
 
-
-/** ??????????????/FTS ??????????? */
+/** 判断是否 SQLite 库损坏或 FTS 虚拟表损坏 */
 function isCorruptError(err: unknown): boolean {
   const code = (err as { code?: string })?.code;
   const msg = err instanceof Error ? err.message : String(err);
@@ -197,7 +199,7 @@ function isCorruptError(err: unknown): boolean {
   );
 }
 
-/** ?????????????????????????????????????????????? .rssany/data/rssany.db??? */
+/** 获取主库连接，路径：.rssany/data/rssany.db */
 export async function getDb(): Promise<Database.Database> {
   if (_db) return _db;
   if (_dbInit) return _dbInit;
@@ -225,7 +227,7 @@ export async function getDb(): Promise<Database.Database> {
         db = null;
       }
       if (isCorruptError(err)) {
-        logCorruptDiagnostic("?????/??????????? (getDb)", err);
+        logCorruptDiagnostic("打开/初始化主库 (getDb)", err);
       }
       throw err;
     }
@@ -233,7 +235,7 @@ export async function getDb(): Promise<Database.Database> {
   return _dbInit;
 }
 
-/** ??? PRAGMA integrity_check??????????????????ok ????????????????????????????database disk image is malformed???????????????????????????????????? catch??? */
+/** 执行 PRAGMA integrity_check；正常为单字 ok；否则为错误描述。亦可能因库损坏在 prepare 阶段抛错，由调用方 catch */
 export async function runIntegrityCheck(): Promise<string> {
   const db = await getDb();
   try {
@@ -241,12 +243,11 @@ export async function runIntegrityCheck(): Promise<string> {
     return row?.integrity_check ?? "unknown";
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return `integrity_check ???????: ${msg}`;
+    return `integrity_check 执行失败: ${msg}`;
   }
 }
 
-
-/** ??????????????????????????????????????????? */
+/** 运行日志库路径：.rssany/data/logs.db（与主库分离，避免主库 WAL 与日志写放大相互影响） */
 const LOGS_DB_PATH = join(DATA_DIR, "logs.db");
 
 let _logsDb: Database.Database | null = null;
@@ -268,7 +269,7 @@ function initLogsSchema(db: Database.Database): void {
   `);
 }
 
-/** ??????????????????????????? .rssany/data/logs.db???????????????????????????????????????? */
+/** 获取运行日志库（独立 logs.db，journal 使用 WAL） */
 export async function getLogsDb(): Promise<Database.Database> {
   if (_logsDb) return _logsDb;
   if (_logsDbInit) return _logsDbInit;
@@ -284,7 +285,10 @@ export async function getLogsDb(): Promise<Database.Database> {
   return _logsDbInit;
 }
 
-/** ????items ?? + FTS5 ???????????????? items_fts_src + ????????? zh-CN?????????????????? .rssany/data/rssany.db ?? -wal???-shm ?????????????????????????????????? logs.db??? */
+/**
+ * 主表 items + FTS5 全文索引；视图 items_fts_src 抽出 zh-CN 译文字段参与检索。
+ * 主库文件旁可能产生 -wal/-shm；日志写入独立 logs.db。
+ */
 function initSchema(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS items (
@@ -358,7 +362,7 @@ function initSchema(db: Database.Database): void {
     END;
   `);
 
-  // ???????????????? image_url ???????????????????????
+  // 旧库迁移：若无 image_url 列则追加
   try {
     const info = db.prepare("PRAGMA table_info(items)").all() as { name: string }[];
     if (info && !info.some((c) => c.name === "image_url")) {
@@ -367,29 +371,30 @@ function initSchema(db: Database.Database): void {
   } catch {
     /* ignore */
   }
-
 }
 
-
-/** ????????????????????????????????????????????????????????????????? ID ????????source_url ????? item.sourceRef???????????????????????????? sourceUrl ?????????????????????? */
+/**
+ * 批量插入或忽略重复（按 id）；新行计入 newIds。
+ * source_url 取自首条 item.sourceRef 或 sourceUrlOverride；须至少其一有值。
+ */
 export async function upsertItems(items: FeedItem[], sourceUrlOverride?: string): Promise<{ newCount: number; newIds: Set<string> }> {
   if (items.length === 0) return { newCount: 0, newIds: new Set() };
   const sourceUrl = sourceUrlOverride ?? items[0].sourceRef;
   if (!sourceUrl) {
-    throw new Error("upsertItems: ???????? item ???? sourceRef????????? sourceUrlOverride");
+    throw new Error("upsertItems: 每条 item 须有 sourceRef，或传入 sourceUrlOverride");
   }
   return withWriteLock(async () => {
-  const db = await getDb();
-  const stmt = db.prepare(`
+    const db = await getDb();
+    const stmt = db.prepare(`
     INSERT OR IGNORE INTO items (id, url, source_url, title, author, summary, image_url, tags, pub_date, fetched_at)
     VALUES (@id, @url, @sourceUrl, @title, @author, @summary, @imageUrl, @tags, @pubDate, @fetchedAt)
   `);
-  const selectExistingStmt = db.prepare(`
+    const selectExistingStmt = db.prepare(`
     SELECT id, title, author, summary, image_url, pub_date, fetched_at
     FROM items
     WHERE id = @id
   `);
-  const repairExistingStmt = db.prepare(`
+    const repairExistingStmt = db.prepare(`
     UPDATE items
     SET title = @title,
         author = @author,
@@ -399,90 +404,90 @@ export async function upsertItems(items: FeedItem[], sourceUrlOverride?: string)
         fetched_at = @fetchedAt
     WHERE id = @id
   `);
-  const now = new Date().toISOString();
-  let newCount = 0;
-  const newIds = new Set<string>();
-  const run = db.transaction((rows: FeedItem[]) => {
-    for (const item of rows) {
-      const nextTitle = normalizeText(item.title) || null;
-      const nextSummary = normalizeText(item.summary) || null;
-      const nextAuthorArr = normalizeAuthor(item.author);
-      const nextAuthor = nextAuthorArr?.length ? JSON.stringify(nextAuthorArr) : null;
-      const nextPubDate =
-        item.pubDate instanceof Date ? item.pubDate.toISOString() : (item.pubDate ?? null);
-      const nextTags = item.tags?.length ? JSON.stringify(item.tags) : null;
-      const nextImageUrl = typeof item.imageUrl === "string" && item.imageUrl.trim() ? item.imageUrl.trim() : null;
-      const info = stmt.run({
-        id: item.guid,
-        url: item.link,
-        sourceUrl,
-        title: nextTitle,
-        author: nextAuthor,
-        summary: nextSummary,
-        imageUrl: nextImageUrl,
-        tags: nextTags,
-        pubDate: nextPubDate,
-        fetchedAt: now,
-      });
-      newCount += info.changes;
-      if (info.changes > 0) newIds.add(item.guid);
+    const now = new Date().toISOString();
+    let newCount = 0;
+    const newIds = new Set<string>();
+    const run = db.transaction((rows: FeedItem[]) => {
+      for (const item of rows) {
+        const nextTitle = normalizeText(item.title) || null;
+        const nextSummary = normalizeText(item.summary) || null;
+        const nextAuthorArr = normalizeAuthor(item.author);
+        const nextAuthor = nextAuthorArr?.length ? JSON.stringify(nextAuthorArr) : null;
+        const nextPubDate =
+          item.pubDate instanceof Date ? item.pubDate.toISOString() : (item.pubDate ?? null);
+        const nextTags = item.tags?.length ? JSON.stringify(item.tags) : null;
+        const nextImageUrl = typeof item.imageUrl === "string" && item.imageUrl.trim() ? item.imageUrl.trim() : null;
+        const info = stmt.run({
+          id: item.guid,
+          url: item.link,
+          sourceUrl,
+          title: nextTitle,
+          author: nextAuthor,
+          summary: nextSummary,
+          imageUrl: nextImageUrl,
+          tags: nextTags,
+          pubDate: nextPubDate,
+          fetchedAt: now,
+        });
+        newCount += info.changes;
+        if (info.changes > 0) newIds.add(item.guid);
 
-      if (info.changes > 0) continue;
-      const existing = selectExistingStmt.get({ id: item.guid }) as {
-        title: string | null;
-        author: string | null;
-        summary: string | null;
-        image_url: string | null;
-        pub_date: string | null;
-        fetched_at: string | null;
-      } | undefined;
-      if (!existing) continue;
+        if (info.changes > 0) continue;
+        const existing = selectExistingStmt.get({ id: item.guid }) as
+          | {
+              title: string | null;
+              author: string | null;
+              summary: string | null;
+              image_url: string | null;
+              pub_date: string | null;
+              fetched_at: string | null;
+            }
+          | undefined;
+        if (!existing) continue;
 
-      const shouldRepairTitle =
-        !!nextTitle && !isDateOnlyTitle(nextTitle) &&
-        (isDateOnlyTitle(existing.title) || !normalizeText(existing.title));
-      const shouldRepairSummary =
-        !!nextSummary && normalizeText(existing.summary).length < nextSummary.length;
-      const shouldRepairImageUrl = !!nextImageUrl && !(existing.image_url?.trim());
-      const existingAuthorArr = parseAuthorFromDb(existing.author);
-      const shouldRepairAuthor = !!nextAuthorArr?.length && !existingAuthorArr?.length;
+        const shouldRepairTitle =
+          !!nextTitle &&
+          !isDateOnlyTitle(nextTitle) &&
+          (isDateOnlyTitle(existing.title) || !normalizeText(existing.title));
+        const shouldRepairSummary =
+          !!nextSummary && normalizeText(existing.summary).length < nextSummary.length;
+        const shouldRepairImageUrl = !!nextImageUrl && !existing.image_url?.trim();
+        const existingAuthorArr = parseAuthorFromDb(existing.author);
+        const shouldRepairAuthor = !!nextAuthorArr?.length && !existingAuthorArr?.length;
 
-      const existingPubDateMs = toMs(existing.pub_date);
-      const existingFetchedAtMs = toMs(existing.fetched_at);
-      const nextPubDateMs = toMs(nextPubDate);
-      const existingPubDateLooksFallback =
-        existingPubDateMs != null &&
-        existingFetchedAtMs != null &&
-        Math.abs(existingPubDateMs - existingFetchedAtMs) <= 5 * 60 * 1000;
-      const shouldRepairPubDate =
-        nextPubDateMs != null &&
-        (
-          existingPubDateMs == null ||
-          (existingPubDateLooksFallback && nextPubDateMs < existingPubDateMs - 24 * 60 * 60 * 1000)
-        );
+        const existingPubDateMs = toMs(existing.pub_date);
+        const existingFetchedAtMs = toMs(existing.fetched_at);
+        const nextPubDateMs = toMs(nextPubDate);
+        const existingPubDateLooksFallback =
+          existingPubDateMs != null &&
+          existingFetchedAtMs != null &&
+          Math.abs(existingPubDateMs - existingFetchedAtMs) <= 5 * 60 * 1000;
+        const shouldRepairPubDate =
+          nextPubDateMs != null &&
+          (existingPubDateMs == null ||
+            (existingPubDateLooksFallback && nextPubDateMs < existingPubDateMs - 24 * 60 * 60 * 1000));
 
-      if (!(shouldRepairTitle || shouldRepairSummary || shouldRepairImageUrl || shouldRepairAuthor || shouldRepairPubDate)) {
-        continue;
+        if (!(shouldRepairTitle || shouldRepairSummary || shouldRepairImageUrl || shouldRepairAuthor || shouldRepairPubDate)) {
+          continue;
+        }
+
+        repairExistingStmt.run({
+          id: item.guid,
+          title: shouldRepairTitle ? nextTitle : existing.title,
+          author: shouldRepairAuthor ? nextAuthor : (existing.author ?? null),
+          summary: shouldRepairSummary ? nextSummary : existing.summary,
+          imageUrl: shouldRepairImageUrl ? nextImageUrl : (existing.image_url ?? null),
+          pubDate: shouldRepairPubDate ? nextPubDate : existing.pub_date,
+          fetchedAt: now,
+        });
       }
-
-      repairExistingStmt.run({
-        id: item.guid,
-        title: shouldRepairTitle ? nextTitle : existing.title,
-        author: shouldRepairAuthor ? nextAuthor : (existing.author ?? null),
-        summary: shouldRepairSummary ? nextSummary : existing.summary,
-        imageUrl: shouldRepairImageUrl ? nextImageUrl : (existing.image_url ?? null),
-        pubDate: shouldRepairPubDate ? nextPubDate : existing.pub_date,
-        fetchedAt: now,
-      });
-    }
-  });
-  run(items);
-  return { newCount, newIds };
+    });
+    run(items);
+    return { newCount, newIds };
   });
 }
 
-
-/** ??????????????? GUID ??????????????????????????? ID ?????????????????? pipeline ?????????????? */
+/** 查询已存在的 guid 集合（用于 pipeline 等判断「是否新行」） */
 export async function getExistingIds(guids: string[]): Promise<Set<string>> {
   if (guids.length === 0) return new Set();
   const db = await getDb();
@@ -491,12 +496,14 @@ export async function getExistingIds(guids: string[]): Promise<Set<string>> {
   return new Set(rows.map((r) => r.id));
 }
 
-
-/** ???????????????????????????????? id ???????????????? url ?? id ??????????????????content/translations ??? COALESCE ???????????????? */
+/**
+ * 按 guid 更新正文等字段；不覆盖已有非空 content（COALESCE），
+ * image_url/author/pub_date 等同理；tags/translations 整列替换。
+ */
 export async function updateItemContent(item: FeedItem): Promise<void> {
   return withWriteLock(async () => {
-  const db = await getDb();
-  db.prepare(`
+    const db = await getDb();
+    db.prepare(`
     UPDATE items
     SET content      = COALESCE(content, @content),
         image_url   = COALESCE(@imageUrl, image_url),
@@ -506,22 +513,21 @@ export async function updateItemContent(item: FeedItem): Promise<void> {
         translations = COALESCE(@translations, translations)
     WHERE id = @id
   `).run({
-    id: item.guid,
-    content: item.content ?? null,
-    imageUrl: typeof item.imageUrl === "string" && item.imageUrl.trim() ? item.imageUrl.trim() : null,
-    author: (() => {
-      const arr = normalizeAuthor(item.author);
-      return arr?.length ? JSON.stringify(arr) : null;
-    })(),
-    pubDate: item.pubDate instanceof Date ? item.pubDate.toISOString() : (item.pubDate ?? null),
-    tags: item.tags?.length ? JSON.stringify(item.tags) : null,
-    translations: item.translations && Object.keys(item.translations).length > 0 ? JSON.stringify(item.translations) : null,
-  });
+      id: item.guid,
+      content: item.content ?? null,
+      imageUrl: typeof item.imageUrl === "string" && item.imageUrl.trim() ? item.imageUrl.trim() : null,
+      author: (() => {
+        const arr = normalizeAuthor(item.author);
+        return arr?.length ? JSON.stringify(arr) : null;
+      })(),
+      pubDate: item.pubDate instanceof Date ? item.pubDate.toISOString() : (item.pubDate ?? null),
+      tags: item.tags?.length ? JSON.stringify(item.tags) : null,
+      translations: item.translations && Object.keys(item.translations).length > 0 ? JSON.stringify(item.translations) : null,
+    });
   });
 }
 
-
-/** ????????????????????????????????????????????????????????since/until ???????????????YYYY-MM-DD ??? ISO ?????? */
+/** 按信源 URL 列表分页拉取；可选 since/until（YYYY-MM-DD 或 ISO 字符串） */
 export async function queryFeedItems(
   sourceUrls: string[],
   limit: number,
@@ -533,7 +539,9 @@ export async function queryFeedItems(
   const placeholders = sourceUrls.map((_, i) => `@u${i}`).join(", ");
   const conditions: string[] = [`source_url IN (${placeholders})`];
   const params: Record<string, unknown> = { lim: limit + 1, off: offset };
-  sourceUrls.forEach((url, i) => { params[`u${i}`] = url; });
+  sourceUrls.forEach((url, i) => {
+    params[`u${i}`] = url;
+  });
   if (opts?.since) {
     conditions.push("COALESCE(pub_date, fetched_at) >= @since");
     params.since = opts.since.length === 10 ? `${opts.since}T00:00:00.000Z` : opts.since;
@@ -541,7 +549,7 @@ export async function queryFeedItems(
   if (opts?.until) {
     conditions.push("COALESCE(pub_date, fetched_at) < @until");
     if (opts.until.length === 10) {
-      const d = new Date(opts.until + "T12:00:00Z");
+      const d = new Date(`${opts.until}T12:00:00Z`);
       d.setUTCDate(d.getUTCDate() + 1);
       params.until = d.toISOString();
     } else {
@@ -549,41 +557,42 @@ export async function queryFeedItems(
     }
   }
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(`
     SELECT * FROM items
     ${where}
     ORDER BY COALESCE(pub_date, fetched_at) DESC
     LIMIT @lim OFFSET @off
-  `).all(params) as Record<string, unknown>[];
+  `)
+    .all(params) as Record<string, unknown>[];
   const hasMore = rows.length > limit;
   const items = mapRowsToDbItems(hasMore ? rows.slice(0, limit) : rows);
   return { items, hasMore };
 }
 
-
-/** ??????? id??guid????????????? MCP/API ????????? */
+/** 按 id（guid）取单条，供 MCP/API 等 */
 export async function getItemById(id: string): Promise<DbItem | null> {
   const db = await getDb();
   const row = db.prepare("SELECT * FROM items WHERE id = @id").get({ id }) as Record<string, unknown> | undefined;
   return row ? toDbItem(row) : null;
 }
 
-
-/** ???????? URL ????????????????????????????????????? /api/feed ??????since ????????????????????????????????? */
+/** 单信源最近条目；可选 since（增量同步 /api/feed 等） */
 export async function queryItemsBySource(sourceUrl: string, limit = 50, since?: Date): Promise<DbItem[]> {
   const db = await getDb();
   const sinceClause = since ? "AND COALESCE(pub_date, fetched_at) >= @since" : "";
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(`
     SELECT * FROM items
     WHERE source_url = @sourceUrl ${sinceClause}
     ORDER BY COALESCE(pub_date, fetched_at) DESC
     LIMIT @limit
-  `).all({ sourceUrl, limit, since: since?.toISOString() ?? null }) as Record<string, unknown>[];
+  `)
+    .all({ sourceUrl, limit, since: since?.toISOString() ?? null }) as Record<string, unknown>[];
   return mapRowsToDbItems(rows);
 }
 
-
-/** ??????????????????????? source_url???sourceUrls???author???tags ????????????????? since ????????????????????????? */
+/** 多条件查询：source_url / sourceUrls / author / 全文 q / tags / 时间范围 */
 export async function queryItems(opts: {
   sourceUrl?: string;
   sourceUrls?: string[];
@@ -618,12 +627,8 @@ export async function queryItems(opts: {
   if (tagsFilter && tagsFilter.length > 0) {
     const trimmed = tagsFilter.filter((t) => typeof t === "string" && t.trim()).map((t) => (t as string).trim());
     if (trimmed.length > 0) {
-      const tagConds = trimmed
-        .map((_, i) => `LOWER(TRIM(json_each.value)) = LOWER(@tag${i})`)
-        .join(" OR ");
-      conditions.push(
-        `i.tags IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(i.tags) WHERE ${tagConds})`
-      );
+      const tagConds = trimmed.map((_, i) => `LOWER(TRIM(json_each.value)) = LOWER(@tag${i})`).join(" OR ");
+      conditions.push(`i.tags IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(i.tags) WHERE ${tagConds})`);
       trimmed.forEach((t, i) => {
         (params as Record<string, unknown>)[`tag${i}`] = t;
       });
@@ -638,84 +643,81 @@ export async function queryItems(opts: {
     params.until = until.toISOString();
   }
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(`
     SELECT i.id, i.url, i.source_url, i.title, i.author, i.summary, i.content, i.tags, i.translations, i.pub_date, i.fetched_at, i.pushed_at
     FROM items i ${where}
     ORDER BY COALESCE(i.pub_date, i.fetched_at) DESC
     LIMIT @limit OFFSET @offset
-  `).all(params) as Record<string, unknown>[];
+  `)
+    .all(params) as Record<string, unknown>[];
   const { count } = db.prepare(`SELECT COUNT(*) as count FROM items i ${where}`).get(params) as { count: number };
   return { items: mapRowsToDbItems(rows), total: count };
 }
 
-
-/** ??????????????? tags ???????????????????????????????????????????????????? */
+/** 从所有条目的 tags JSON 中移除指定标签（大小写不敏感），返回更新行数 */
 export async function removeTagFromAllItems(tag: string): Promise<number> {
   const trimmed = String(tag ?? "").trim();
   if (!trimmed) return 0;
   const targetLower = trimmed.toLowerCase();
 
   return withWriteLock(async () => {
-  const db = await getDb();
-  const rows = db
-    .prepare("SELECT id, tags FROM items WHERE tags IS NOT NULL AND tags != ''")
-    .all() as { id: string; tags: string }[];
+    const db = await getDb();
+    const rows = db.prepare("SELECT id, tags FROM items WHERE tags IS NOT NULL AND tags != ''").all() as { id: string; tags: string }[];
 
-  const updateStmt = db.prepare("UPDATE items SET tags = @tags WHERE id = @id");
-  let count = 0;
-  const run = db.transaction(() => {
-    for (const row of rows) {
-      let itemTags: string[];
-      try {
-        itemTags = JSON.parse(row.tags) as string[];
-      } catch {
-        continue;
+    const updateStmt = db.prepare("UPDATE items SET tags = @tags WHERE id = @id");
+    let count = 0;
+    const run = db.transaction(() => {
+      for (const row of rows) {
+        let itemTags: string[];
+        try {
+          itemTags = JSON.parse(row.tags) as string[];
+        } catch {
+          continue;
+        }
+        const filtered = itemTags.filter((t) => String(t).trim().toLowerCase() !== targetLower);
+        if (filtered.length === itemTags.length) continue;
+        const nextTags = filtered.length > 0 ? JSON.stringify(filtered) : null;
+        updateStmt.run({ id: row.id, tags: nextTags });
+        count += 1;
       }
-      const filtered = itemTags.filter((t) => String(t).trim().toLowerCase() !== targetLower);
-      if (filtered.length === itemTags.length) continue;
-      const nextTags = filtered.length > 0 ? JSON.stringify(filtered) : null;
-      updateStmt.run({ id: row.id, tags: nextTags });
-      count += 1;
-    }
-  });
-  run();
-  return count;
+    });
+    run();
+    return count;
   });
 }
 
-
-/** ???????????????? OpenWebUI???????? pushed_at ????? */
+/** 标记已投递（如 OpenWebUI 等出站），写入 pushed_at */
 export async function markPushed(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   return withWriteLock(async () => {
-  const db = await getDb();
-  const now = new Date().toISOString();
-  const stmt = db.prepare("UPDATE items SET pushed_at = @now WHERE id = @id");
-  const run = db.transaction((list: string[]) => {
-    for (const id of list) stmt.run({ now, id });
-  });
-  run(ids);
+    const db = await getDb();
+    const now = new Date().toISOString();
+    const stmt = db.prepare("UPDATE items SET pushed_at = @now WHERE id = @id");
+    const run = db.transaction((list: string[]) => {
+      for (const id of list) stmt.run({ now, id });
+    });
+    run(ids);
   });
 }
 
-
-/** ??? id??guid??????????????????????? FTS ?????????????FTS ???? items_fts_src ???????? title_zh ??????? */
+/** 按 id 删除条目；同步删除 FTS 行（content 模式依赖 items_fts_src，zh-CN 字段在触发器中已展开） */
 export async function deleteItem(id: string): Promise<boolean> {
   if (!id?.trim()) return false;
   return withWriteLock(async () => {
-  const db = await getDb();
-  const run = db.transaction(() => {
-    const row = db.prepare("SELECT rowid FROM items WHERE id = @id").get({ id: id.trim() }) as { rowid: number } | undefined;
-    if (!row) return 0;
-    db.prepare("DELETE FROM items_fts WHERE rowid = @rowid").run({ rowid: row.rowid });
-    const info = db.prepare("DELETE FROM items WHERE id = @id").run({ id: id.trim() });
-    return info.changes;
-  });
-  return run() > 0;
+    const db = await getDb();
+    const run = db.transaction(() => {
+      const row = db.prepare("SELECT rowid FROM items WHERE id = @id").get({ id: id.trim() }) as { rowid: number } | undefined;
+      if (!row) return 0;
+      db.prepare("DELETE FROM items_fts WHERE rowid = @rowid").run({ rowid: row.rowid });
+      const info = db.prepare("DELETE FROM items WHERE id = @id").run({ id: id.trim() });
+      return info.changes;
+    });
+    return run() > 0;
   });
 }
 
-/** ??? source_url ???????????????????????FTS ?????????????????????????????????????? */
+/** 按 source_url 删除该信源下全部条目（DELETE 触发器会同步 FTS） */
 export async function deleteItemsBySourceUrl(sourceUrl: string): Promise<number> {
   if (!sourceUrl?.trim()) return 0;
   return withWriteLock(async () => {
@@ -725,45 +727,47 @@ export async function deleteItemsBySourceUrl(sourceUrl: string): Promise<number>
   });
 }
 
-
-/** ??????????????????pushed_at ???? content ????? */
+/** 待投递：未写 pushed_at 且已有 content */
 export async function getPendingPushItems(limit = 100): Promise<DbItem[]> {
   const db = await getDb();
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(`
     SELECT * FROM items
     WHERE pushed_at IS NULL AND content IS NOT NULL
     ORDER BY fetched_at ASC
     LIMIT @limit
-  `).all({ limit }) as Record<string, unknown>[];
+  `)
+    .all({ limit }) as Record<string, unknown>[];
   return mapRowsToDbItems(rows);
 }
 
-
-/** ?????????????????YYYY-MM-DD???????????????????????????????????????????? fetched_at ??????????? 300 ? */
+/** 按本地日（YYYY-MM-DD）取当日抓取过的条目，按 fetched_at，最多 300 条 */
 export async function getItemsForDate(date: string): Promise<DbItem[]> {
   const db = await getDb();
   const start = new Date(`${date}T00:00:00`).toISOString();
   const end = new Date(`${date}T23:59:59.999`).toISOString();
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(`
     SELECT * FROM items
     WHERE fetched_at >= @start AND fetched_at <= @end
     ORDER BY fetched_at DESC
     LIMIT 300
-  `).all({ start, end }) as Record<string, unknown>[];
+  `)
+    .all({ start, end }) as Record<string, unknown>[];
   return mapRowsToDbItems(rows);
 }
 
-
-/** ??????? source_url ????????????????????????????????????????????????? */
+/** 各信源条目数与最新一条时间，用于管理页统计 */
 export async function getSourceStats(): Promise<{ source_url: string; count: number; latest_at: string | null }[]> {
   const db = await getDb();
-  return db.prepare(
-    "SELECT source_url, COUNT(*) as count, MAX(COALESCE(pub_date, fetched_at)) as latest_at FROM items GROUP BY source_url ORDER BY count DESC"
-  ).all() as { source_url: string; count: number; latest_at: string | null }[];
+  return db
+    .prepare(
+      "SELECT source_url, COUNT(*) as count, MAX(COALESCE(pub_date, fetched_at)) as latest_at FROM items GROUP BY source_url ORDER BY count DESC",
+    )
+    .all() as { source_url: string; count: number; latest_at: string | null }[];
 }
 
-
-/** ??????????????????? logger ??????????????????????? logs.db?????????????????????? */
+/** 写入一条运行日志到 logs.db（payload 为 JSON 字符串） */
 export async function insertLog(entry: LogEntry): Promise<void> {
   const db = await getLogsDb();
   db.prepare(`
@@ -778,8 +782,7 @@ export async function insertLog(entry: LogEntry): Promise<void> {
   });
 }
 
-
-/** ????????????????????????????????????????????????????????? logs.db?? */
+/** 分页查询运行日志（logs.db） */
 export async function queryLogs(opts: {
   level?: LogEntry["level"];
   category?: LogEntry["category"];
@@ -804,12 +807,14 @@ export async function queryLogs(opts: {
     params.since = since.toISOString();
   }
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(`
     SELECT id, level, category, message, payload, created_at
     FROM logs ${where}
     ORDER BY created_at DESC
     LIMIT @limit OFFSET @offset
-  `).all(params) as DbLog[];
+  `)
+    .all(params) as DbLog[];
   const { count } = db.prepare(`SELECT COUNT(*) as count FROM logs ${where}`).get(params) as { count: number };
   return { items: rows, total: count };
 }
@@ -821,8 +826,7 @@ export async function clearAllLogs(): Promise<number> {
   return r.changes;
 }
 
-
-/** ????????????????????????????? .rssany/tags.json?????? pipeline tagger ????? */
+/** 读取系统标签列表：.rssany/tags.json，供 pipeline tagger 等 */
 export async function getSystemTags(): Promise<string[]> {
   try {
     const raw = await readFile(TAGS_CONFIG_PATH, "utf-8");
@@ -836,7 +840,7 @@ export async function getSystemTags(): Promise<string[]> {
   }
 }
 
-/** ???????????? .rssany/tags.json */
+/** 保存系统标签到 .rssany/tags.json */
 export async function saveSystemTagsToFile(tags: string[]): Promise<void> {
   const list = tags
     .filter((t) => typeof t === "string" && t.trim())
@@ -844,7 +848,7 @@ export async function saveSystemTagsToFile(tags: string[]): Promise<void> {
   await writeFile(TAGS_CONFIG_PATH, JSON.stringify({ tags: list }, null, 2), "utf-8");
 }
 
-/** ??????????????????????????????????????????????? tags.json + DB */
+/** 系统标签使用统计：结合 tags.json 与库内条目的 tags 字段 */
 export async function getSystemTagStats(): Promise<TagStat[]> {
   const systemTags = await getSystemTags();
   if (systemTags.length === 0) return [];
@@ -891,7 +895,7 @@ export async function getSystemTagStats(): Promise<TagStat[]> {
   });
 }
 
-/** ?????????????????????????? + ???? + track ??????????? */
+/** 标签统计：条数 + 热度（时间衰减） */
 export interface TagStat {
   name: string;
   count: number;
@@ -899,14 +903,14 @@ export interface TagStat {
   period?: number;
 }
 
-/** ?????????????? tag ??????????? 1/(1 + days_ago/7)?????????????? */
+/** 时间衰减因子：1 / (1 + days_ago/7)，越新权重越高 */
 function recencyFactor(pubDateMs: number | null, fetchedAtMs: number, nowMs: number): number {
   const ref = pubDateMs ?? fetchedAtMs;
   const daysAgo = (nowMs - ref) / (24 * 60 * 60 * 1000);
   return 1 / (1 + Math.max(0, daysAgo) / 7);
 }
 
-/** ?????????????????????????????????????????????????????????????? 5 ??????? > 20 */
+/** 非系统标签中热度较高者，返回最多 5 个且 hotness > 20 */
 export async function getSuggestedTags(): Promise<TagStat[]> {
   const systemTags = await getSystemTags();
   const systemLower = new Set(systemTags.map((t) => t.toLowerCase().trim()));
@@ -953,7 +957,7 @@ export async function getSuggestedTags(): Promise<TagStat[]> {
     .map((s) => ({ name: s.name, count: s.count, hotness: Math.round(s.hotness * 100) / 100 }));
 }
 
-/** ???????????????snake_case???? FeedItem ??????????author / tags ????????????? */
+/** 库中行结构（snake_case）；与 FeedItem 对应，author/tags 等为解析后类型 */
 export interface DbItem {
   id: string;
   url: string;
@@ -970,7 +974,7 @@ export interface DbItem {
   pushed_at: string | null;
 }
 
-/** ????????????? */
+/** 运行日志表行 */
 export interface DbLog {
   id: number;
   level: string;

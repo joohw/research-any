@@ -2,19 +2,16 @@
 
 import { cacheKey, cacheKeyFromCron } from "../core/cacher/index.js";
 import { getSource } from "../scraper/sources/index.js";
-import { getMatchedEnrichPlugin } from "../plugins/loader.js";
 import { runPipeline } from "../pipeline/index.js";
-import { buildEnrichContext } from "../scraper/sources/web/index.js";
 import { AuthRequiredError } from "../scraper/auth/index.js";
 import { buildRssXml } from "./rss.js";
 import type { RssChannel, RssEntry } from "./types.js";
 import type { FeedItem } from "../types/feedItem.js";
 import { normalizeAuthor, getEffectiveItemFields, isPipelineDroppedItem } from "../types/feedItem.js";
 import type { FeederConfig } from "./types.js";
-import type { SourceContext } from "../scraper/sources/types.js";
+import { buildSourceContext } from "../scraper/sources/context.js";
 import { upsertItems, updateItemContent, getSystemTags, deleteItem } from "../db/index.js";
 import { emitFeedUpdated } from "../core/events/index.js";
-import { enrichQueue } from "../scraper/enrich/index.js";
 import { chatJson, chatText } from "../core/llm.js";
 import type { PipelineContext } from "../pipeline/index.js";
 import { logger } from "../core/logger/index.js";
@@ -61,41 +58,16 @@ const pipelineCtx: PipelineContext = {
 };
 
 /** 单条 pipeline */
-async function runPipelineOnItem(
-  item: FeedItem,
-  ctx: { sourceUrl: string; isEnriched?: boolean },
-): Promise<FeedItem> {
+async function runPipelineOnItem(item: FeedItem, ctx: { sourceUrl: string }): Promise<FeedItem> {
   return runPipeline(item, { ...pipelineCtx, ...ctx });
 }
 
 
-/** 构建组合 enrich 函数：source.enrichItem 优先，无则用匹配的 enrich 插件补充 */
-function buildEnrichFn(
-  source: { enrichItem?: (item: FeedItem, ctx: SourceContext) => Promise<FeedItem> },
-  listUrl: string,
-  ctx: SourceContext,
-): (item: FeedItem) => Promise<FeedItem> {
-  const enrichCtx = buildEnrichContext(ctx);
-  enrichCtx.sourceUrl = listUrl;
-  return async (item: FeedItem) => {
-    let result = item;
-    if (source.enrichItem) {
-      result = await source.enrichItem!(item, ctx);
-    }
-    const plugin = getMatchedEnrichPlugin(result, { sourceUrl: listUrl });
-    if (plugin) {
-      result = await plugin.enrichItem(result, enrichCtx);
-    }
-    return result;
-  };
-}
-
-
-/** 执行生成流程：获取条目列表；若信源有 enrichItem 或匹配 enrich 插件则提交到 EnrichQueue */
+/** 执行生成流程：抓取 → 入库 → 对新条目跑 pipeline → 更新库 */
 async function generateAndCache(listUrl: string, key: string, config: FeederConfig): Promise<{ items: FeedItem[] }> {
-  const { cacheDir = "cache", includeContent = true, headless } = config;
+  const { cacheDir = "cache", headless } = config;
   const source = getSource(listUrl);
-  const ctx = { cacheDir, headless, proxy: config.proxy ?? source.proxy };
+  const ctx = buildSourceContext({ cacheDir, headless, proxy: config.proxy ?? source.proxy });
   let items: FeedItem[];
   try {
     items = await source.fetchItems(listUrl, ctx);
@@ -126,71 +98,29 @@ async function generateAndCache(listUrl: string, key: string, config: FeederConf
   let pipelineDroppedNew = 0;
   const shouldRunPipelineRow = (guid: string) => newIds.has(guid);
 
-  const hasEnrich =
-    source.enrichItem != null || items.some((i) => getMatchedEnrichPlugin(i, { sourceUrl: listUrl }));
-  if (!includeContent || items.length === 0 || !hasEnrich) {
-    for (let i = 0; i < items.length; i++) {
-      if (!shouldRunPipelineRow(items[i].guid)) continue;
-      const processed = await runPipelineOnItem(items[i], { sourceUrl: listUrl, isEnriched: false });
-      items[i] = processed;
-      if (isPipelineDroppedItem(processed)) {
-        await deleteItem(processed.guid).catch((err) =>
-          logger.warn("db", "质量过滤后删除条目失败", { source_url: listUrl, err: err instanceof Error ? err.message : String(err) })
-        );
-        pipelineDroppedNew++;
-      } else {
-        updateItemContent(processed).catch((err) =>
-          logger.warn("db", "updateItemContent 失败", { source_url: listUrl, err: err instanceof Error ? err.message : String(err) })
-        );
-      }
+  for (let i = 0; i < items.length; i++) {
+    if (!shouldRunPipelineRow(items[i].guid)) continue;
+    const processed = await runPipelineOnItem(items[i], { sourceUrl: listUrl });
+    items[i] = processed;
+    if (isPipelineDroppedItem(processed)) {
+      await deleteItem(processed.guid).catch((err) =>
+        logger.warn("db", "质量过滤后删除条目失败", { source_url: listUrl, err: err instanceof Error ? err.message : String(err) })
+      );
+      pipelineDroppedNew++;
+    } else {
+      updateItemContent(processed).catch((err) =>
+        logger.warn("db", "updateItemContent 失败", { source_url: listUrl, err: err instanceof Error ? err.message : String(err) })
+      );
     }
-    if (newCount > 0) {
-      emitFeedUpdated({ sourceUrl: listUrl, newCount: newCount - pipelineDroppedNew });
-    }
-    const out = items.filter((i) => !isPipelineDroppedItem(i));
-    if (deliverUrl && out.length > 0) {
-      await postDeliverItemsSafe(deliverUrl, listUrl, out);
-    }
-    return { items: out };
   }
-  const enrichFn = (item: FeedItem, _ctx: SourceContext) => buildEnrichFn(source, listUrl, ctx)(item);
-  await enrichQueue.submit(
-    items,
-    enrichFn,
-    ctx,
-    {
-      sourceUrl: listUrl,
-      onItemDone: async (enrichedItem, index) => {
-        enrichedItem.sourceRef = listUrl;
-        const processed = shouldRunPipelineRow(enrichedItem.guid)
-          ? await runPipelineOnItem(enrichedItem, { sourceUrl: listUrl, isEnriched: true })
-          : enrichedItem;
-        items[index] = processed;
-        if (isPipelineDroppedItem(processed)) {
-          await deleteItem(processed.guid).catch((err) =>
-            logger.warn("db", "质量过滤后删除条目失败", { source_url: listUrl, err: err instanceof Error ? err.message : String(err) })
-          );
-          pipelineDroppedNew++;
-        } else {
-          updateItemContent(processed).catch((err) =>
-            logger.warn("db", "updateItemContent 失败", { source_url: listUrl, err: err instanceof Error ? err.message : String(err) })
-          );
-        }
-      },
-      onAllDone: async () => {
-        for (let i = items.length - 1; i >= 0; i--) {
-          if (isPipelineDroppedItem(items[i])) items.splice(i, 1);
-        }
-        if (newCount > 0) {
-          emitFeedUpdated({ sourceUrl: listUrl, newCount: newCount - pipelineDroppedNew });
-        }
-        if (deliverUrl && items.length > 0) {
-          await postDeliverItemsSafe(deliverUrl, listUrl, items);
-        }
-      },
-    },
-  );
-  return { items };
+  if (newCount > 0) {
+    emitFeedUpdated({ sourceUrl: listUrl, newCount: newCount - pipelineDroppedNew });
+  }
+  const out = items.filter((i) => !isPipelineDroppedItem(i));
+  if (deliverUrl && out.length > 0) {
+    await postDeliverItemsSafe(deliverUrl, listUrl, out);
+  }
+  return { items: out };
 }
 
 
@@ -202,7 +132,13 @@ export async function getItems(listUrl: string, config: FeederConfig = {}): Prom
     : cacheKey(listUrl, config.refreshInterval ?? source.refreshInterval ?? "1day");
   if (source.preCheck != null) {
     try {
-      await source.preCheck({ cacheDir: config.cacheDir ?? "cache", headless: config.headless, proxy: config.proxy ?? source.proxy });
+      await source.preCheck(
+        buildSourceContext({
+          cacheDir: config.cacheDir ?? "cache",
+          headless: config.headless,
+          proxy: config.proxy ?? source.proxy,
+        }),
+      );
     } catch (err) {
       if (err instanceof AuthRequiredError) throw err;
       throw err;

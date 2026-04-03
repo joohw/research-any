@@ -7,64 +7,8 @@ import { toAuthFlow, getSiteByUrl } from "./site.js";
 import { AuthRequiredError } from "../../auth/index.js";
 import type { Site, SiteContext } from "./site.js";
 import type { Source, SourceContext } from "../types.js";
-import type { EnrichContext } from "../../../plugins/loader.js";
 import type { FeedItem } from "../../../types/feedItem.js";
 import { normalizeAuthor } from "../../../types/feedItem.js";
-
-
-/** 从 SourceContext 构建 Enrich 插件上下文（无 auth，供 enrich 插件使用） */
-export function buildEnrichContext(ctx: SourceContext): EnrichContext {
-  return {
-    cacheDir: ctx.cacheDir,
-    headless: ctx.headless,
-    proxy: ctx.proxy,
-    async fetchHtml(url, opts) {
-      const res = await fetchHtmlFn(url, {
-        cacheDir: ctx.cacheDir,
-        useCache: false,
-        authFlow: undefined,
-        headless: ctx.headless,
-        proxy: ctx.proxy,
-        waitAfterLoadMs: opts?.waitMs,
-        purify: opts?.purify,
-      });
-      return { html: res.body, finalUrl: res.finalUrl ?? url, status: res.status };
-    },
-    async extractItem(item, opts) {
-      const res = await fetchHtmlFn(item.link, {
-        cacheDir: ctx.cacheDir,
-        useCache: false,
-        authFlow: undefined,
-        headless: ctx.headless,
-        proxy: ctx.proxy,
-      });
-      if (res.status !== 200 && res.status !== 304) {
-        throw new Error(`默认正文提取失败: HTTP ${res.status} ${res.statusText} for ${item.link}`);
-      }
-      const extracted = await extractHtml(res.body, {
-        url: res.finalUrl ?? item.link,
-        cacheDir: ctx.cacheDir ?? undefined,
-        mode: "readability",
-        useCache: true,
-        cacheKey: opts?.cacheKey,
-      });
-      const pubDate =
-        extracted.pubDate != null
-          ? typeof extracted.pubDate === "string"
-            ? new Date(extracted.pubDate)
-            : extracted.pubDate
-          : item.pubDate;
-      return {
-        ...item,
-        author: normalizeAuthor(extracted.author ?? item.author),
-        title: extracted.title ?? item.title,
-        summary: extracted.summary ?? item.summary,
-        content: extracted.content ?? item.content,
-        pubDate,
-      };
-    },
-  };
-}
 
 
 /** 从 SourceContext + Site 构建注入了工具的 SiteContext */
@@ -75,6 +19,7 @@ export function buildSiteContext(site: Site, ctx: SourceContext): SiteContext {
     cacheDir: ctx.cacheDir,
     headless: ctx.headless,
     proxy,
+    deps: ctx.deps,
     async fetchHtml(url, opts) {
       const res = await fetchHtmlFn(url, {
         cacheDir: ctx.cacheDir,
@@ -145,11 +90,6 @@ export function createWebSource(site: Site): Source {
     async fetchItems(sourceId: string, ctx: SourceContext): Promise<FeedItem[]> {
       return site.fetchItems(sourceId, buildSiteContext(site, ctx));
     },
-    enrichItem: site.enrichItem
-      ? async (item: FeedItem, ctx: SourceContext): Promise<FeedItem> => {
-          return site.enrichItem!(item, buildSiteContext(site, ctx));
-        }
-      : undefined,
   };
 }
 

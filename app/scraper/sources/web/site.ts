@@ -1,5 +1,6 @@
-// 站点抽象接口：声明 URL 模式及 fetchItems / enrichItem 能力（WebSource 专用）
+// 站点抽象接口：声明 URL 模式及 fetchItems 能力（WebSource 专用）
 
+import type { PluginHostDeps } from "../../../plugins/hostDeps.js";
 import type { AuthFlow, CheckAuthFn } from "../../auth/index.js";
 import type { RefreshInterval } from "../../../utils/refreshInterval.js";
 import type { FeedItem } from "../../../types/feedItem.js";
@@ -13,6 +14,8 @@ export interface SiteContext {
   headless?: boolean;
   /** 代理地址 */
   proxy?: string;
+  /** 与 SourceContext.deps 相同，宿主注入依赖，用户插件勿从 npm 直接 import */
+  deps: PluginHostDeps;
   /**
    * 用浏览器抓取指定 URL，返回渲染后的 HTML。
    * 插件需要访问网页时调用此方法，框架负责浏览器管理与 cookie 注入。
@@ -23,8 +26,7 @@ export interface SiteContext {
   ): Promise<{ html: string; finalUrl: string; status: number }>;
   /**
    * 默认正文提取：拉取 item.link 的 HTML 后用 Readability 提取正文，合并回条目并返回。
-   * 插件在 enrichItem 中可直接 return ctx.extractItem(item) 使用默认提取，无需自写解析。
-   * 即时资讯类站点可不实现 enrichItem，不做正文补全。
+   * 可在 fetchItems 内按需 await ctx.extractItem(单条) 使用。
    */
   extractItem(
     item: FeedItem,
@@ -48,11 +50,6 @@ export interface Site {
    * 插件自行决定如何获取数据（调用 ctx.fetchHtml、直接 fetch API 等均可）。
    */
   fetchItems(sourceId: string, ctx: SiteContext): Promise<FeedItem[]>;
-  /**
-   * 可选：对单条目异步补全正文（后台任务）。
-   * 返回携带 content 的完整条目。
-   */
-  enrichItem?(item: FeedItem, ctx: SiteContext): Promise<FeedItem>;
   /** 认证：检查是否已登录 */
   checkAuth?: CheckAuthFn | null;
   /** 认证：登录页 URL */

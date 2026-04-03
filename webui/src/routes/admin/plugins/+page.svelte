@@ -11,7 +11,6 @@
   interface Plugin {
     id: string;
     listUrlPattern: string;
-    hasEnrich: boolean;
     hasAuth: boolean;
     /** Site 与 Source 类插件（非 Site 的 pattern 匹配） */
     kind?: 'site' | 'source';

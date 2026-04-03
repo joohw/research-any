@@ -26,7 +26,7 @@ export const SOURCES_CONFIG_PATH = join(USER_DIR, "sources.json");
 /** 系统标签配置：.rssany/tags.json（供 pipeline tagger 使用） */
 export const TAGS_CONFIG_PATH = join(USER_DIR, "tags.json");
 
-/** 全局配置：.rssany/config.json（enrich、pipeline 等） */
+/** 全局配置：.rssany/config.json（pipeline 等） */
 export const CONFIG_PATH = join(USER_DIR, "config.json");
 
 /** @deprecated 仅用于迁移：若存在 .rssany/subscriptions.json 且无 sources.json 则迁移为 sources.json */
@@ -38,11 +38,9 @@ export const BUILTIN_PLUGINS_DIR = join(PACKAGE_ROOT, "plugins");
 /** 用户自定义插件目录：.rssany/plugins/（用户数据，不纳入版本管理） */
 export const USER_PLUGINS_DIR = join(USER_DIR, "plugins");
 
-/** 插件子目录：sources（信源） / enrich（补全）；pipeline 已移至 app/pipeline/ 作为固定流程 */
+/** 插件子目录：sources（信源）；pipeline 已移至 app/pipeline/ 作为固定流程 */
 export const BUILTIN_SOURCES_DIR = join(BUILTIN_PLUGINS_DIR, "sources");
 export const USER_SOURCES_DIR = join(USER_PLUGINS_DIR, "sources");
-export const BUILTIN_ENRICH_DIR = join(BUILTIN_PLUGINS_DIR, "enrich");
-export const USER_ENRICH_DIR = join(USER_PLUGINS_DIR, "enrich");
 
 async function pathExists(p: string): Promise<boolean> {
   try {
@@ -98,7 +96,6 @@ export async function initUserDir(): Promise<void> {
   await mkdir(CACHE_DIR, { recursive: true });
   await mkdir(USER_PLUGINS_DIR, { recursive: true });
   await mkdir(USER_SOURCES_DIR, { recursive: true });
-  await mkdir(USER_ENRICH_DIR, { recursive: true });
   await seedExampleConfigsIfMissing();
   if (!(await pathExists(SOURCES_CONFIG_PATH)) && (await pathExists(LEGACY_SUBSCRIPTIONS_PATH))) {
     await migrateFile(LEGACY_SUBSCRIPTIONS_PATH, SOURCES_CONFIG_PATH);

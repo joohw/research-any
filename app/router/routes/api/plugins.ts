@@ -14,6 +14,7 @@ const USER_SITE_TEMPLATE = join(BUILTIN_PLUGINS_DIR, "templates", "site.rssany.j
 
 const SITE_TEMPLATE_FALLBACK = `/**
  * Site 插件模板（由管理页添加，位于 .rssany/plugins/sources/）
+ * HTML DOM 解析请用 ctx.deps.parseHtml，勿在插件内 import node_modules。
  */
 export default {
   id: "__PLUGIN_ID__",
@@ -25,7 +26,7 @@ export default {
       waitMs: 2000,
       purify: true,
     });
-    void html;
+    void ctx.deps.parseHtml(html);
     void finalUrl;
     return [];
   },
@@ -94,7 +95,6 @@ export function registerPluginsRoutes(app: Hono): void {
       kind: "site" as const,
       id: s.id,
       listUrlPattern: typeof s.listUrlPattern === "string" ? s.listUrlPattern : String(s.listUrlPattern),
-      hasEnrich: !!s.enrichItem,
       hasAuth: !!(s.checkAuth && s.loginUrl),
     }));
     const siteIds = new Set(sites.map((p) => p.id));
@@ -104,7 +104,6 @@ export function registerPluginsRoutes(app: Hono): void {
         kind: "source" as const,
         id: src.id,
         listUrlPattern: typeof src.pattern === "string" ? src.pattern : String(src.pattern),
-        hasEnrich: !!src.enrichItem,
         hasAuth: false,
       }));
     return c.json([...sites, ...sources]);

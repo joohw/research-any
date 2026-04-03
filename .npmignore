@@ -1,0 +1,48 @@
+# npm pack / publish：存在本文件时，npm 不再使用 .gitignore 作为排除规则。
+# 发布内容仍以 package.json 的 `files` 白名单为准；下列为兜底排除，避免将来放宽 `files` 或本地误操作。
+
+# VCS / CI
+.git/
+.github/
+
+# 锁文件（不随包发布）
+pnpm-lock.yaml
+pnpm-workspace.yaml
+package-lock.json
+yarn.lock
+
+# 源码与未构建前端（白名单未包含时不会进包，此处双保险）
+app/
+webui/
+!webui/build/
+
+# 仅发布 reset 脚本时排除其它 scripts（白名单已限 scripts/reset.mjs）
+scripts/
+!scripts/reset.mjs
+
+# 开发配置与测试
+tsconfig.json
+tsconfig.*.json
+vite.config.ts
+vitest.config.*
+eslint.config.*
+.prettierrc*
+*.test.ts
+*.spec.ts
+coverage/
+.nyc_output/
+
+# 用户数据与本地
+.rssany/
+.env
+.env.*
+
+# 杂项
+*.tgz
+*.log
+.DS_Store
+
+# 仓库内文档（README 由 npm 默认包含；其余不打包进 tarball）
+AGENTS.MD
+CONVENTIONS.md
+STYLE.md

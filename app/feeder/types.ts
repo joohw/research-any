@@ -29,7 +29,7 @@ export interface RssEntry {
 export interface FeederConfig {
   /** 缓存目录，feeds 缓存写入 cacheDir/feeds/ */
   cacheDir?: string;
-  /** 是否抓取详情正文，默认 true；列表会立即返回，详情在后台补全并更新缓存 */
+  /** 保留字段；正文由信源 `fetchItems` 内完成，不再单独异步补全 */
   includeContent?: boolean;
   /** 是否使用无头浏览器，默认 true；设为 false 时使用有头浏览器（可视化） */
   headless?: boolean;

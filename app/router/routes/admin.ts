@@ -1,9 +1,9 @@
 // Admin 路由：解析调试、正文提取调试
 
 import type { Hono } from "hono";
-import type { FeedItem } from "../../types/feedItem.js";
 import { getSource } from "../../scraper/sources/index.js";
-import { getBestSite, buildSiteContext } from "../../scraper/sources/web/index.js";
+import { buildSourceContext } from "../../scraper/sources/context.js";
+import { getBestSite } from "../../scraper/sources/web/index.js";
 import { extractFromLink } from "../../scraper/sources/web/extractor/index.js";
 import { CACHE_DIR } from "../../config/paths.js";
 import { AuthRequiredError } from "../../scraper/auth/index.js";
@@ -24,7 +24,7 @@ export function registerAdminRoutes(app: Hono): void {
       const headlessParam = c.req.query("headless");
       const headless = headlessParam === "false" || headlessParam === "0" ? false : undefined;
       const source = getSource(url);
-      const ctx = { cacheDir: CACHE_DIR, headless, proxy: source.proxy };
+      const ctx = buildSourceContext({ cacheDir: CACHE_DIR, headless, proxy: source.proxy });
       const items = await source.fetchItems(url, ctx);
       const mode = source.id === "generic" ? "generic" : "plugin";
       return c.json({ items, url, mode, pluginId: source.id });
@@ -45,18 +45,6 @@ export function registerAdminRoutes(app: Hono): void {
       const headlessParam = c.req.query("headless");
       const headless = headlessParam === "false" || headlessParam === "0" ? false : undefined;
       const site = getBestSite(url);
-      if (site?.enrichItem) {
-        const siteCtx = buildSiteContext(site, { cacheDir: CACHE_DIR, headless });
-        const stub: FeedItem = { guid: url, title: "", link: url, pubDate: new Date() };
-        const enriched = await site.enrichItem(stub, siteCtx);
-        return c.json({
-          title: enriched.title ?? null,
-          author: enriched.author ?? null,
-          pubDate: enriched.pubDate instanceof Date ? enriched.pubDate.toISOString() : (enriched.pubDate ?? null),
-          content: enriched.content ?? null,
-          _extractor: site.id,
-        });
-      }
       const proxy = site?.proxy;
       const result = await extractFromLink(url, {}, { timeoutMs: 60_000, headless, proxy });
       return c.json({
