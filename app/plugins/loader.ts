@@ -1,17 +1,11 @@
-// 插件加载器：从 plugins/sources/ 和 .rssany/plugins/sources/ 加载信源与 Source 插件
-// pipeline 已移至 app/pipeline/ 作为固定流程，不再作为插件
+// 插件加载器：从 app/plugins/builtin/ 与 .rssany/plugins/ 加载 Site / Source 插件
 
 import { readdir } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import type { Site } from "../scraper/sources/web/site.js";
 import type { Source } from "../scraper/sources/types.js";
-import {
-  BUILTIN_SOURCES_DIR,
-  USER_SOURCES_DIR,
-  BUILTIN_PLUGINS_DIR,
-  USER_PLUGINS_DIR,
-} from "../config/paths.js";
+import { BUILTIN_PLUGINS_DIR, USER_PLUGINS_DIR } from "../config/paths.js";
 import { logger } from "../core/logger/index.js";
 
 
@@ -101,8 +95,7 @@ async function loadSourcePluginsFromDir(
 }
 
 
-/** 加载 sources 目录，若不存在或为空则回退到 plugins 根目录 */
-async function loadFromSourcesOrRoot(): Promise<{
+async function loadBuiltinAndUser(): Promise<{
   builtin: {
     siteEntries: Array<{ site: Site; filePath: string }>;
     sources: Array<{ source: Source; filePath: string }>;
@@ -112,21 +105,11 @@ async function loadFromSourcesOrRoot(): Promise<{
     sources: Array<{ source: Source; filePath: string }>;
   };
 }> {
-  const [builtinFromSources, userFromSources] = await Promise.all([
-    loadSourcePluginsFromDir(BUILTIN_SOURCES_DIR, "builtin:sources"),
-    loadSourcePluginsFromDir(USER_SOURCES_DIR, "user:sources"),
-  ]);
-  const hasAny =
-    builtinFromSources.siteEntries.length +
-    builtinFromSources.sources.length +
-    userFromSources.siteEntries.length +
-    userFromSources.sources.length > 0;
-  if (hasAny) return { builtin: builtinFromSources, user: userFromSources };
-  const [builtinRoot, userRoot] = await Promise.all([
+  const [builtin, user] = await Promise.all([
     loadSourcePluginsFromDir(BUILTIN_PLUGINS_DIR, "builtin"),
     loadSourcePluginsFromDir(USER_PLUGINS_DIR, "user"),
   ]);
-  return { builtin: builtinRoot, user: userRoot };
+  return { builtin, user };
 }
 
 
@@ -164,7 +147,7 @@ export function getPluginFilePath(id: string): string | undefined {
 
 /** 加载所有 Site 插件；用户插件可覆盖同 id 内置 */
 export async function loadPlugins(): Promise<Site[]> {
-  const { builtin, user } = await loadFromSourcesOrRoot();
+  const { builtin, user } = await loadBuiltinAndUser();
   const merged = new Map<string, Site>();
   const pathMap = new Map<string, string>();
   for (const { site, filePath } of builtin.siteEntries) {
@@ -185,7 +168,7 @@ export async function loadPlugins(): Promise<Site[]> {
 
 /** 加载所有 Source 插件；用户插件可覆盖同 id */
 export async function loadSourcePlugins(): Promise<Source[]> {
-  const { builtin, user } = await loadFromSourcesOrRoot();
+  const { builtin, user } = await loadBuiltinAndUser();
   const merged = new Map<string, Source>();
   for (const { source } of builtin.sources) merged.set(source.id, source);
   for (const { source } of user.sources) {
@@ -198,7 +181,7 @@ export async function loadSourcePlugins(): Promise<Source[]> {
 
 /** 加载 Site 与 Source：合并去重，供 initSources 使用；同时更新 pluginSitePaths */
 export async function loadSiteAndSourcePlugins(): Promise<{ sites: Site[]; sources: Source[] }> {
-  const { builtin, user } = await loadFromSourcesOrRoot();
+  const { builtin, user } = await loadBuiltinAndUser();
   const siteMap = new Map<string, Site>();
   const pathMap = new Map<string, string>();
   for (const { site: s, filePath } of builtin.siteEntries) {

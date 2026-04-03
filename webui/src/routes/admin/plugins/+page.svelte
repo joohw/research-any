@@ -158,7 +158,7 @@
         <div class="state">
           暂无已加载插件。可
           <button type="button" class="link-btn" onclick={openAddDialog}>添加插件</button>
-          从模板创建，或在 <code>plugins/</code>、<code>.rssany/plugins/sources/</code> 放置 *.rssany.js / *.rssany.ts
+          从模板创建，或在 <code>app/plugins/builtin/</code>、<code>.rssany/plugins/</code> 放置 *.rssany.js / *.rssany.ts
         </div>
       {:else}
         <div class="list">
@@ -197,8 +197,8 @@
       </div>
       <form class="modal-body" onsubmit={submitNewPlugin}>
         <p class="add-hint">
-          基于仓库模板 <code>plugins/templates/site.rssany.js</code> 生成
-          <code>.rssany/plugins/sources/&lt;id&gt;.rssany.ts</code>。id 须字母开头，仅字母数字、下划线、连字符；不能使用 id
+          基于仓库模板 <code>app/plugins/site.rssany.js</code> 生成
+          <code>.rssany/plugins/&lt;id&gt;.rssany.js</code>。id 须字母开头，仅字母数字、下划线、连字符；不能使用 id
           <code>new</code>。
         </p>
         <div class="field">

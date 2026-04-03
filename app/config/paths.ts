@@ -32,15 +32,14 @@ export const CONFIG_PATH = join(USER_DIR, "config.json");
 /** @deprecated 仅用于迁移：若存在 .rssany/subscriptions.json 且无 sources.json 则迁移为 sources.json */
 const LEGACY_SUBSCRIPTIONS_PATH = join(USER_DIR, "subscriptions.json");
 
-/** 内置插件目录：plugins/（项目文件，纳入版本管理；全局安装时相对 npm 包根） */
-export const BUILTIN_PLUGINS_DIR = join(PACKAGE_ROOT, "plugins");
+/** 内置信源插件目录：app/plugins/builtin/（随包发布 *.rssany.js） */
+export const BUILTIN_PLUGINS_DIR = join(PACKAGE_ROOT, "app/plugins/builtin");
 
-/** 用户自定义插件目录：.rssany/plugins/（用户数据，不纳入版本管理） */
+/** 用户插件目录：.rssany/plugins/（扁平 *.rssany.js / *.rssany.ts） */
 export const USER_PLUGINS_DIR = join(USER_DIR, "plugins");
 
-/** 插件子目录：sources（信源）；pipeline 已移至 app/pipeline/ 作为固定流程 */
-export const BUILTIN_SOURCES_DIR = join(BUILTIN_PLUGINS_DIR, "sources");
-export const USER_SOURCES_DIR = join(USER_PLUGINS_DIR, "sources");
+/** 管理页「添加插件」所用模板（非 Site，不参与加载） */
+export const PLUGIN_SITE_TEMPLATE_PATH = join(PACKAGE_ROOT, "app/plugins/site.rssany.js");
 
 async function pathExists(p: string): Promise<boolean> {
   try {
@@ -95,7 +94,6 @@ export async function initUserDir(): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true });
   await mkdir(CACHE_DIR, { recursive: true });
   await mkdir(USER_PLUGINS_DIR, { recursive: true });
-  await mkdir(USER_SOURCES_DIR, { recursive: true });
   await seedExampleConfigsIfMissing();
   if (!(await pathExists(SOURCES_CONFIG_PATH)) && (await pathExists(LEGACY_SUBSCRIPTIONS_PATH))) {
     await migrateFile(LEGACY_SUBSCRIPTIONS_PATH, SOURCES_CONFIG_PATH);

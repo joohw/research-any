@@ -1,5 +1,5 @@
 /**
- * Site 插件模板（管理页「添加插件」会复制到 `.rssany/plugins/sources/{id}.rssany.ts`）
+ * Site 插件模板（管理页「添加插件」会复制到 `.rssany/plugins/{id}.rssany.js`）
  * 修改 `id` 后请与文件名保持一致。
  *
  * 接口说明：app/scraper/sources/web/site.ts

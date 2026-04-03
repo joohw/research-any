@@ -132,7 +132,7 @@
     return 'https://' + r;
   }
 
-  /** 与内置 `plugins/sources/rss.rssany.js` 的 looksLikeFeed 一致，用于判断走 RSS/Atom 类解析 */
+  /** 与内置 `app/plugins/builtin/rss.rssany.js` 的 looksLikeFeed 一致，用于判断走 RSS/Atom 类解析 */
   function looksLikeFeedUrl(url: string): boolean {
     const lower = url.toLowerCase();
     return (

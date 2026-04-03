@@ -8,12 +8,10 @@ import { registeredSources } from "../../../scraper/sources/index.js";
 import { getPluginFilePath } from "../../../plugins/loader.js";
 import { requireAdmin } from "../../../auth/middleware.js";
 import { initSources } from "../../../scraper/sources/index.js";
-import { BUILTIN_PLUGINS_DIR, USER_PLUGINS_DIR, USER_SOURCES_DIR } from "../../../config/paths.js";
-
-const USER_SITE_TEMPLATE = join(BUILTIN_PLUGINS_DIR, "templates", "site.rssany.js");
+import { BUILTIN_PLUGINS_DIR, USER_PLUGINS_DIR, PLUGIN_SITE_TEMPLATE_PATH } from "../../../config/paths.js";
 
 const SITE_TEMPLATE_FALLBACK = `/**
- * Site 插件模板（由管理页添加，位于 .rssany/plugins/sources/）
+ * Site 插件模板（由管理页添加，位于 .rssany/plugins/）
  * HTML DOM 解析请用 ctx.deps.parseHtml，勿在插件内 import node_modules。
  */
 export default {
@@ -56,7 +54,7 @@ function isAllowedPluginPath(absPath: string): boolean {
 }
 
 export function registerPluginsRoutes(app: Hono): void {
-  /** 从模板在 .rssany/plugins/sources/{id}.rssany.ts 新建 Site 插件 */
+  /** 从模板在 .rssany/plugins/{id}.rssany.js 新建 Site 插件 */
   app.post("/api/plugins", requireAdmin(), async (c) => {
     let body: { id?: string };
     try {
@@ -70,12 +68,11 @@ export function registerPluginsRoutes(app: Hono): void {
       return c.json({ error: "id 须为字母开头，仅含字母数字、下划线、连字符；不能为 generic 或 new" }, 400);
     }
     await mkdir(USER_PLUGINS_DIR, { recursive: true });
-    await mkdir(USER_SOURCES_DIR, { recursive: true });
-    const outPath = join(USER_SOURCES_DIR, `${id}.rssany.ts`);
+    const outPath = join(USER_PLUGINS_DIR, `${id}.rssany.js`);
     if (await fileExists(outPath)) return c.json({ error: "该 id 已存在同名文件" }, 409);
     let tpl = SITE_TEMPLATE_FALLBACK;
     try {
-      tpl = await readFile(USER_SITE_TEMPLATE, "utf-8");
+      tpl = await readFile(PLUGIN_SITE_TEMPLATE_PATH, "utf-8");
     } catch {
       // 使用内置模板
     }
