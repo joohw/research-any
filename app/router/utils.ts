@@ -2,8 +2,9 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { PACKAGE_ROOT } from "../packageRoot.js";
 
-export const STATICS_DIR = join(process.cwd(), "statics");
+export const STATICS_DIR = join(PACKAGE_ROOT, "statics");
 
 /** 从路径提取 URL（与 /rss/* 一致） */
 export function parseUrlFromPath(path: string, prefix: string): string | null {

@@ -2,13 +2,19 @@
 
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { serveStatic } from "@hono/node-server/serve-static";
 import type { Context, Hono } from "hono";
+import { PACKAGE_ROOT } from "../packageRoot.js";
 
 /** 与 svelte.config.js 中 adapter-static 的 pages/assets 输出目录一致 */
 export function getWebUiBuildDir(): string {
-  return join(process.cwd(), process.env.WEBUI_BUILD_DIR ?? "webui/build");
+  const w = process.env.WEBUI_BUILD_DIR?.trim();
+  if (w) {
+    if (w.startsWith("/") || /^[A-Za-z]:[\\/]/.test(w)) return w;
+    return join(process.cwd(), w);
+  }
+  return join(PACKAGE_ROOT, "webui/build");
 }
 
 /** 仅后端接口路径，不走静态/SPA；注意 /admin 为前端路由，仅 /admin/parse、/admin/extractor 为后端 */
@@ -40,8 +46,13 @@ export function registerWebUiRoutes(app: Hono): void {
     return;
   }
 
-  const relRoot = join(process.env.WEBUI_BUILD_DIR ?? "webui/build").replace(/\\/g, "/");
-  const staticRoot = relRoot.startsWith(".") ? relRoot : `./${relRoot}`;
+  const relRoot = relative(process.cwd(), absRoot).replace(/\\/g, "/");
+  const staticRoot =
+    relRoot === "" || relRoot === "."
+      ? "."
+      : relRoot.startsWith(".") || relRoot.startsWith("/") || /^[A-Za-z]:/.test(relRoot)
+        ? relRoot
+        : `./${relRoot}`;
 
   const staticMw = serveStatic({
     root: staticRoot,

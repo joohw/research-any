@@ -1,8 +1,9 @@
-# RssAny
+# RSSAny - 把任何信息变成RSS订阅
 
-> 以**爬虫调度**为主：按信源抓取网页 / RSS / 邮件等，解析、补全文、打标签与翻译后**入库**，再按需生成 **RSS / Atom / JSON Feed** 与 JSON API。
 
-**RssAny** 是一套自托管的订阅管线：列表 URL → **抓取与解析**（规则 / LLM）→ **正文提取**（自定义 / Readability / LLM）→ **upsert 去重** → 固定 **pipeline**（打标签、翻译等）→ 对外提供 `**/rss`** 等输出。产品重心在**本机定时爬取与转 RSS**，而不是接收外部 HTTP 推送条目。
+> 按信源抓取网页 / RSS / 邮件等，解析、补全文、打标签与翻译后**入库**，再按需生成 **RSS / Atom / JSON Feed** 与 JSON API。
+
+**RSSAny** 是一套自托管的订阅管线：列表 URL → **抓取与解析**（规则 / LLM）→ **正文提取**（自定义 / Readability / LLM）→ **upsert 去重** → 固定 **pipeline**（打标签、翻译等）→ 对外提供 `**/rss`** 等输出。
 
 ---
 
@@ -27,7 +28,7 @@
 | --- | ------------------------------------------------------------ |
 | 运行时 | Node.js **20–23**（见 `package.json` `engines`）                |
 | 后端  | Hono、`tsx` 开发入口                                              |
-| 数据  | **SQLite**（`better-sqlite3`），默认 `**.rssany/data/rssany.db`** |
+| 数据  | **SQLite**（`better-sqlite3`），默认 **`~/.rssany/data/rssany.db`**（Windows：`%USERPROFILE%\.rssany\data\rssany.db`） |
 | 前端  | `webui/`（SvelteKit + Vite，构建输出由根服务托管）                        |
 
 
@@ -55,11 +56,7 @@ pnpm run webui:install
   ```bash
    cp .env.example .env
   ```
-2. 复制信源与全局配置示例：
-  ```bash
-   cp sources.example.json .rssany/sources.json
-   cp config.examples.json .rssany/config.json
-  ```
+2. 信源与全局配置：首次启动会在 **`~/.rssany/`**（Windows：`%USERPROFILE%\.rssany\`）下自动从包内示例生成 `sources.json`、`config.json`（若已存在则不会覆盖）。也可手动复制仓库里的 `sources.example.json`、`config.examples.json`。
 3. （可选）LLM：在 `.env` 中设置 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL` 等。
 
 ### 运行
@@ -75,7 +72,13 @@ pnpm run webui:build
 pnpm dev
 ```
 
-默认监听 `**http://127.0.0.1:3751/**`（端口见 `.env.example` 中 `PORT`）。
+默认监听 `**http://127.0.0.1:18473/**`（端口见 `.env.example` 中 `PORT`，避免与常见开发端口冲突）。
+
+**重置本地数据**（结束占用 `PORT` 的监听进程，并删除 **`~/.rssany/`**，或 `RSSANY_USER_DIR` 所设目录）：
+
+```bash
+pnpm reset
+```
 
 **仅调试 WebUI 热更新**（可选）：`cd webui && pnpm dev`（Vite 代理到本机后端，见 `webui/vite.config.ts`）。
 
@@ -84,6 +87,19 @@ pnpm dev
 ```bash
 pnpm run webui:build && pnpm start
 ```
+
+### npm 全局安装（或 `npx`）
+
+发布包时 `prepublishOnly` 会执行 `build:all`（后端 `vite build` + `webui:build`）。安装后：
+
+```bash
+npm install -g rssany
+rssany
+```
+
+重置数据（结束 `PORT` 监听进程并删除用户目录）：**`rssany reset`**（与仓库内 **`pnpm reset`** 相同逻辑；可在含 `.env` 的目录下执行以读取 `PORT` / `RSSANY_USER_DIR`）。
+
+用户数据在 **`~/.rssany/`**（Windows：`%USERPROFILE%\.rssany`），与工作目录无关。可选环境变量 **`RSSANY_USER_DIR`** 可指定其它路径。等价于 `node node_modules/rssany/dist/index.js`；CLI 名称为 `rssany`。内置 `plugins/`、`statics/`、`webui/build` 随包安装路径解析。
 
 ---
 
@@ -160,8 +176,9 @@ sources.json / Site 插件
 ```
 ├── app/                 # 后端：路由、feeder、scraper、pipeline、mcp、db、auth…
 ├── plugins/             # 内置信源 / enrich 等插件
-├── webui/               # SvelteKit 前端
-└── .rssany/             # 运行时用户目录（首次启动创建，一般不提交）
+└── webui/               # SvelteKit 前端
+
+~/.rssany/               # 运行时用户数据（首次启动创建；或 RSSANY_USER_DIR）
     ├── sources.json
     ├── config.json
     ├── tags.json

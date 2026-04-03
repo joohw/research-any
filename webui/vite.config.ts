@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  * 开发 / preview 时把浏览器里的相对路径请求转到本机 Hono。
  * 覆盖环境变量可连远端：VITE_API_PROXY_TARGET=https://example.com
  */
-const API_TARGET = process.env.VITE_API_PROXY_TARGET?.trim() || 'http://127.0.0.1:3751';
+const API_TARGET = process.env.VITE_API_PROXY_TARGET?.trim() || 'http://127.0.0.1:18473';
 
 const proxy = {
   '/api': { target: API_TARGET, changeOrigin: true, secure: false },

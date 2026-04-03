@@ -4,7 +4,7 @@ import { networkInterfaces } from "node:os";
 import type { Hono } from "hono";
 import { requireAdmin } from "../../../auth/middleware.js";
 
-const PORT = Number(process.env.PORT) || 3751;
+const PORT = Number(process.env.PORT) || 18473;
 
 export function registerServerRoutes(app: Hono): void {
   app.get("/api/server-info", requireAdmin(), (c) => {

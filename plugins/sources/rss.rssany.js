@@ -3,10 +3,11 @@
 import Parser from "rss-parser";
 import { createHash } from "node:crypto";
 
+const UA = "RssAny/1.0 (+https://github.com/joohw/rssany)";
 const parser = new Parser({
   timeout: 15_000,
   headers: {
-    "User-Agent": "RssAny/1.0 (+https://github.com/rssany/rssany)",
+    "User-Agent": UA,
     Accept: "application/rss+xml,application/atom+xml,application/json,application/xml,text/xml,*/*",
   },
 });
@@ -34,7 +35,7 @@ async function fetchFeed(url, proxy) {
     const parserWithProxy = new Parser({
       timeout: 15_000,
       headers: {
-        "User-Agent": "RssAny/1.0",
+        "User-Agent": UA,
         Accept: "application/rss+xml,application/atom+xml,application/json,application/xml,text/xml,*/*",
       },
       requestOptions: { agent },
@@ -70,7 +71,7 @@ export default {
         typeof item.content === "string" ? item.content : typeof item["content:encoded"] === "string" ? item["content:encoded"] : undefined;
       return {
         guid,
-        title: item.title ?? "(无标题)",
+        title: item.title ?? "",
         link,
         pubDate,
         author,

@@ -4,6 +4,25 @@
   "description": "Universal RSS/Atom/JSON Feed pipeline — fetches, extracts, parses and converts any web content into consumable feeds with plugin support",
   "author": "Joo",
   "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "bin": {
+    "rssany": "./bin/rssany.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "plugins",
+    "statics",
+    "webui/build",
+    ".env.example",
+    "README.md",
+    "sources.example.json",
+    "config.examples.json",
+    "scripts/reset.mjs"
+  ],
   "engines": {
     "node": ">=20 <24"
   },
@@ -20,11 +39,13 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
-    "webui:install": "cd webui && pnpm install",
+    "reset": "node scripts/reset.mjs",
+    "webui:install": "cd webui && npm install",
     "webui:dev": "cd webui && pnpm run dev",
-    "webui:build": "cd webui && pnpm run build",
-    "webui:watch": "cd webui && pnpm run build:watch",
+    "webui:build": "cd webui && npm run build",
+    "webui:watch": "cd webui && npm run build:watch",
     "build:all": "npm run build && npm run webui:build",
+    "prepublishOnly": "npm run build:all",
     "docker:build": "bash scripts/docker-build.sh",
     "docker:build:tag": "bash scripts/docker-build.sh"
   },

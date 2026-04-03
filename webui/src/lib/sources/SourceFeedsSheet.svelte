@@ -93,7 +93,10 @@
     <Dialog.Content class="source-sheet-panel" aria-describedby={undefined}>
       <header class="source-sheet-header">
         <div class="source-sheet-title-wrap">
-          <Dialog.Title class="source-sheet-title">{sourceLabel || sourceRef || '信源条目'}</Dialog.Title>
+          <Dialog.Title
+            class="source-sheet-title"
+            title={sourceLabel || sourceRef || undefined}
+          >{sourceLabel || sourceRef || '信源条目'}</Dialog.Title>
           <p class="source-sheet-sub" title={sourceRef}>{sourceRef}</p>
         </div>
         <Dialog.Close class="source-sheet-close" aria-label="关闭">
@@ -241,16 +244,18 @@
     margin: 0;
     color: var(--color-foreground);
     line-height: 1.35;
-    word-break: break-word;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .source-sheet-sub {
     margin: 0.35rem 0 0;
     font-size: 0.72rem;
     color: var(--color-muted-foreground-soft);
-    word-break: break-all;
     line-height: 1.35;
-    max-height: 3.2em;
+    white-space: nowrap;
     overflow: hidden;
+    text-overflow: ellipsis;
   }
   :global(.source-sheet-close) {
     flex-shrink: 0;
@@ -308,9 +313,10 @@
   .source-feed-link {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
     gap: 0.25rem;
     padding: 0.65rem 1.25rem;
+    min-width: 0;
     text-decoration: none;
     color: inherit;
     transition: background 0.12s;
@@ -323,7 +329,10 @@
     font-weight: 500;
     color: var(--color-foreground);
     line-height: 1.4;
-    word-break: break-word;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .source-feed-link:hover .source-feed-title {
     color: var(--color-primary);
@@ -331,7 +340,9 @@
   .source-feed-meta {
     display: inline-flex;
     align-items: center;
+    align-self: flex-start;
     gap: 0.35rem;
+    flex-shrink: 0;
     font-size: 0.7rem;
     color: var(--color-muted-foreground-soft);
     font-variant-numeric: tabular-nums;

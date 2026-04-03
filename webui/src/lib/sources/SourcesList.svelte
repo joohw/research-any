@@ -68,6 +68,18 @@
     return DEFAULT_SOURCE_REFRESH;
   }
 
+  /** 信源权重：0–1；用于排序「重要性」 */
+  function clampWeight01(n: number): number {
+    return Math.min(1, Math.max(0, n));
+  }
+
+  function parseWeight01(raw: unknown): { ok: true; value: number } | { ok: false; message: string } {
+    const n = typeof raw === 'number' && !Number.isNaN(raw) ? raw : Number(String(raw).trim());
+    if (!Number.isFinite(n)) return { ok: false, message: '权重需为 0–1 之间的数字' };
+    if (n < 0 || n > 1) return { ok: false, message: '权重需在 0–1 之间' };
+    return { ok: true, value: n };
+  }
+
   // ── 列表状态 ──────────────────────────────────────────
   let rawSources: SubscriptionSource[] = [];
   let cards: SourceCard[] = [];
@@ -323,7 +335,7 @@
     formRef = card.ref;
     formLabel = src?.label ?? '';
     formDescription = src?.description ?? '';
-    formWeight = src?.weight ?? 0;
+    formWeight = clampWeight01(src?.weight ?? 0);
     formRefresh = normalizeFormRefresh(src?.refresh);
     formProxy = src?.proxy ?? '';
     saveError = '';
@@ -340,16 +352,22 @@
   async function saveSource() {
     const ref = formRef.trim();
     if (!ref) { saveError = 'ref 不能为空'; return; }
+    const weightParsed = parseWeight01(formWeight);
+    if (!weightParsed.ok) {
+      saveError = weightParsed.message;
+      return;
+    }
     saving = true;
     saveError = '';
     try {
+      const w = weightParsed.value;
       const item: SubscriptionSource = {
         ref,
         ...(formLabel.trim()       ? { label:       formLabel.trim() }       : {}),
         ...(formDescription.trim() ? { description: formDescription.trim() } : {}),
         refresh: formRefresh,
         ...(formProxy.trim()       ? { proxy:       formProxy.trim() }        : {}),
-        ...(formWeight !== 0       ? { weight:      formWeight }              : {}),
+        ...(w !== 0 ? { weight: w } : {}),
       };
       let updated: SubscriptionSource[];
       if (isEditing) {
@@ -625,8 +643,17 @@
         </div>
         <div class="field-row">
           <div class="field">
-            <span class="field-label">权重</span>
-            <input class="field-input" type="number" bind:value={formWeight} />
+            <span class="field-label">权重（0–1）</span>
+            <input
+              class="field-input field-input--weight"
+              type="number"
+              min="0"
+              max="1"
+              step="0.01"
+              inputmode="decimal"
+              placeholder="0–1"
+              bind:value={formWeight}
+            />
           </div>
           <div class="field">
             <span class="field-label">刷新间隔</span>
@@ -1387,6 +1414,15 @@
   .field-input:focus {
     border-color: var(--color-primary);
     background: var(--color-card-elevated);
+  }
+  /* 仅数字输入，不显示 type=number 的 ± 步进按钮 */
+  .field-input--weight {
+    -moz-appearance: textfield;
+  }
+  .field-input--weight::-webkit-outer-spin-button,
+  .field-input--weight::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
   }
 
   .save-error {

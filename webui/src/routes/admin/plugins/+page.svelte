@@ -2,6 +2,10 @@
   import { PRODUCT_NAME } from '$lib/brand';
   import { adminFetch } from '$lib/adminAuth';
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
+  import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
+  import { Dialog } from 'bits-ui';
   import { showToast } from '$lib/toastStore.js';
 
   interface Plugin {
@@ -16,6 +20,59 @@
   let plugins: Plugin[] = [];
   let loadError = '';
   let loading = true;
+
+  let showAddDialog = false;
+  let newPluginId = '';
+  let addBusy = false;
+
+  function openAddDialog() {
+    newPluginId = '';
+    showAddDialog = true;
+  }
+
+  function onAddDialogOpenChange(open: boolean) {
+    showAddDialog = open;
+    if (!open) newPluginId = '';
+  }
+
+  async function submitNewPlugin(e: Event) {
+    e.preventDefault();
+    const id = newPluginId.trim();
+    if (!id) {
+      showToast('请填写插件 id', 'error');
+      return;
+    }
+    addBusy = true;
+    try {
+      const res = await adminFetch('/api/plugins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const txt = await res.text();
+      let j: { error?: string; ok?: boolean } = {};
+      try {
+        j = txt ? (JSON.parse(txt) as { error?: string; ok?: boolean }) : {};
+      } catch {
+        j = {};
+      }
+      if (!res.ok) {
+        showToast(j.error || txt || `HTTP ${res.status}`, 'error');
+        return;
+      }
+      if (j.ok) {
+        showToast('已创建插件文件', 'success');
+        showAddDialog = false;
+        newPluginId = '';
+        await loadPlugins();
+        await goto('/admin/plugins/' + encodeURIComponent(id));
+      }
+    } catch (err) {
+      showToast('请求失败: ' + (err instanceof Error ? err.message : String(err)), 'error');
+    } finally {
+      addBusy = false;
+    }
+  }
 
   async function loadPlugins() {
     loading = true;
@@ -64,7 +121,15 @@
     }
   }
 
-  onMount(loadPlugins);
+  onMount(() => {
+    loadPlugins();
+    const url = get(page).url;
+    if (url.searchParams.get('openAdd') === '1') {
+      newPluginId = '';
+      showAddDialog = true;
+      goto('/admin/plugins', { replaceState: true });
+    }
+  });
 </script>
 
 <svelte:head>
@@ -80,7 +145,7 @@
             <h2>插件</h2>
             <p class="sub">编写插件以适配特定页面的解析规则，比 LLM 兜底更快、更稳定。</p>
           </div>
-          <a class="btn-add" href="/admin/plugins/new">添加插件</a>
+          <button type="button" class="btn-add" onclick={openAddDialog}>添加插件</button>
         </div>
       </div>
     </div>
@@ -91,7 +156,11 @@
       {:else if loadError}
         <div class="state error">{loadError}</div>
       {:else if plugins.length === 0}
-        <div class="state">暂无已加载插件。可打开 <a class="inline-link" href="/admin/plugins/new">添加插件</a> 从模板创建，或在 <code>plugins/</code>、<code>.rssany/plugins/sources/</code> 放置 *.rssany.js / *.rssany.ts</div>
+        <div class="state">
+          暂无已加载插件。可
+          <button type="button" class="link-btn" onclick={openAddDialog}>添加插件</button>
+          从模板创建，或在 <code>plugins/</code>、<code>.rssany/plugins/sources/</code> 放置 *.rssany.js / *.rssany.ts
+        </div>
       {:else}
         <div class="list">
           {#each plugins as plugin (plugin.id)}
@@ -118,6 +187,43 @@
     </div>
   </div>
 </div>
+
+<Dialog.Root open={showAddDialog} onOpenChange={onAddDialogOpenChange}>
+  <Dialog.Portal>
+    <Dialog.Overlay class="modal-overlay" />
+    <Dialog.Content class="modal" aria-describedby={undefined}>
+      <div class="modal-header">
+        <Dialog.Title class="modal-title">添加插件</Dialog.Title>
+        <Dialog.Close class="modal-close" aria-label="关闭">✕</Dialog.Close>
+      </div>
+      <form class="modal-body" onsubmit={submitNewPlugin}>
+        <p class="add-hint">
+          基于仓库模板 <code>plugins/templates/site.rssany.js</code> 生成
+          <code>.rssany/plugins/sources/&lt;id&gt;.rssany.ts</code>。id 须字母开头，仅字母数字、下划线、连字符；不能使用 id
+          <code>new</code>。
+        </p>
+        <div class="field">
+          <span class="field-label">插件 id</span>
+          <input
+            class="field-input"
+            type="text"
+            name="pluginId"
+            bind:value={newPluginId}
+            placeholder="例如 my-site"
+            autocomplete="off"
+            spellcheck={false}
+          />
+        </div>
+        <div class="modal-footer">
+          <div class="modal-footer-right">
+            <Dialog.Close class="btn-cancel" disabled={addBusy} type="button">取消</Dialog.Close>
+            <button type="submit" class="btn-save" disabled={addBusy}>{addBusy ? '创建中…' : '创建并打开编辑'}</button>
+          </div>
+        </div>
+      </form>
+    </Dialog.Content>
+  </Dialog.Portal>
+</Dialog.Root>
 
 <style>
   /**
@@ -191,18 +297,26 @@
     font-family: inherit;
     background: var(--color-primary);
     color: var(--color-primary-foreground);
-    text-decoration: none;
+    border: none;
+    cursor: pointer;
     display: inline-flex;
     align-items: center;
   }
   .btn-add:hover {
     background: var(--color-primary-hover);
   }
-  .inline-link {
+  .link-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
     color: var(--color-primary);
     text-decoration: underline;
+    cursor: pointer;
+    font: inherit;
+    font-size: inherit;
   }
-  .inline-link:hover {
+  .link-btn:hover {
     color: var(--color-primary-hover);
   }
   .feed-header h2 {
@@ -337,5 +451,138 @@
     .row-pattern {
       display: none;
     }
+  }
+
+  /* bits-ui Dialog Portal */
+  :global(.modal-overlay) {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 100;
+  }
+  :global(.modal) {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--color-card-elevated);
+    border-radius: 10px;
+    width: calc(100% - 2rem);
+    max-width: 520px;
+    box-shadow: var(--shadow-panel);
+    border: 1px solid var(--color-border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 101;
+  }
+  :global(.modal) .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem 0.75rem;
+    border-bottom: 1px solid var(--color-border-muted);
+  }
+  :global(.modal-title) {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--color-foreground);
+  }
+  :global(.modal-close) {
+    background: none;
+    border: none;
+    padding: 0.25rem;
+    font-size: 1rem;
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    line-height: 1;
+    border-radius: 4px;
+  }
+  :global(.modal-close:hover) {
+    color: var(--color-foreground);
+    background: var(--color-muted);
+  }
+  .modal-body {
+    padding: 1rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .add-hint {
+    margin: 0;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--color-muted-foreground-soft);
+  }
+  .add-hint code {
+    font-size: 0.68rem;
+    word-break: break-all;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .field-label {
+    font-size: 0.8125rem;
+    color: var(--color-muted-foreground-strong);
+  }
+  .field-input {
+    padding: 0.5rem 0.65rem;
+    border-radius: var(--radius-sm, 6px);
+    border: 1px solid var(--color-input);
+    background: var(--color-card);
+    color: var(--color-foreground);
+    font-family: ui-monospace, monospace;
+    font-size: 0.875rem;
+    width: 100%;
+    outline: none;
+  }
+  .field-input:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 45%, transparent);
+  }
+  .modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding-top: 0.25rem;
+    border-top: none;
+  }
+  .modal-footer-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  :global(.btn-cancel) {
+    padding: 0.4rem 1rem;
+    font-size: 0.875rem;
+    color: var(--color-foreground);
+    background: var(--color-muted);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+  :global(.btn-cancel:hover:not(:disabled)) {
+    background: var(--color-accent);
+  }
+  .btn-save {
+    padding: 0.4rem 1.2rem;
+    font-size: 0.875rem;
+    color: var(--color-primary-foreground);
+    background: var(--color-primary);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .btn-save:hover:not(:disabled) {
+    opacity: 0.85;
+  }
+  .btn-save:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 </style>

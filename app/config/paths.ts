@@ -1,11 +1,15 @@
 // 路径配置：集中管理所有运行时路径，区分项目文件与用户数据
 
-import { mkdir, rename, access } from "node:fs/promises";
+import { mkdir, rename, access, copyFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { logger } from "../core/logger/index.js";
+import { PACKAGE_ROOT } from "../packageRoot.js";
 
-/** 用户数据根目录：.rssany/（不纳入版本管理，存放所有运行时用户数据） */
-export const USER_DIR = join(process.cwd(), ".rssany");
+const envUserDir = process.env.RSSANY_USER_DIR?.trim();
+
+/** 用户数据根目录：~/.rssany/（或 RSSANY_USER_DIR）；不纳入版本管理 */
+export const USER_DIR = envUserDir && envUserDir.length > 0 ? envUserDir : join(homedir(), ".rssany");
 
 /** SQLite 数据库目录：.rssany/data/ */
 export const DATA_DIR = join(USER_DIR, "data");
@@ -28,8 +32,8 @@ export const CONFIG_PATH = join(USER_DIR, "config.json");
 /** @deprecated 仅用于迁移：若存在 .rssany/subscriptions.json 且无 sources.json 则迁移为 sources.json */
 const LEGACY_SUBSCRIPTIONS_PATH = join(USER_DIR, "subscriptions.json");
 
-/** 内置插件目录：plugins/（项目文件，纳入版本管理） */
-export const BUILTIN_PLUGINS_DIR = join(process.cwd(), "plugins");
+/** 内置插件目录：plugins/（项目文件，纳入版本管理；全局安装时相对 npm 包根） */
+export const BUILTIN_PLUGINS_DIR = join(PACKAGE_ROOT, "plugins");
 
 /** 用户自定义插件目录：.rssany/plugins/（用户数据，不纳入版本管理） */
 export const USER_PLUGINS_DIR = join(USER_DIR, "plugins");
@@ -60,7 +64,34 @@ async function migrateFile(from: string, to: string): Promise<void> {
   }
 }
 
-/** 初始化用户数据目录，自动迁移旧版配置文件到 .rssany/ */
+/** 包内示例（与仓库根一致；发布包需列入 package.json `files`） */
+const EXAMPLE_SOURCES = join(PACKAGE_ROOT, "sources.example.json");
+const EXAMPLE_CONFIG = join(PACKAGE_ROOT, "config.examples.json");
+
+async function seedExampleConfigsIfMissing(): Promise<void> {
+  if (!(await pathExists(SOURCES_CONFIG_PATH)) && (await pathExists(EXAMPLE_SOURCES))) {
+    try {
+      await copyFile(EXAMPLE_SOURCES, SOURCES_CONFIG_PATH);
+      logger.info("config", "已写入默认信源示例", { path: SOURCES_CONFIG_PATH });
+    } catch (err) {
+      logger.warn("config", "写入 sources 示例失败", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  if (!(await pathExists(CONFIG_PATH)) && (await pathExists(EXAMPLE_CONFIG))) {
+    try {
+      await copyFile(EXAMPLE_CONFIG, CONFIG_PATH);
+      logger.info("config", "已写入默认配置示例", { path: CONFIG_PATH });
+    } catch (err) {
+      logger.warn("config", "写入 config 示例失败", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
+/** 初始化用户数据目录；若缺少 sources.json / config.json 则从包内示例复制 */
 export async function initUserDir(): Promise<void> {
   await mkdir(USER_DIR, { recursive: true });
   await mkdir(DATA_DIR, { recursive: true });
@@ -68,9 +99,7 @@ export async function initUserDir(): Promise<void> {
   await mkdir(USER_PLUGINS_DIR, { recursive: true });
   await mkdir(USER_SOURCES_DIR, { recursive: true });
   await mkdir(USER_ENRICH_DIR, { recursive: true });
-  await migrateFile(join(process.cwd(), "sites.json"), SITES_CONFIG_PATH);
-  await migrateFile(join(process.cwd(), "subscriptions.json"), SOURCES_CONFIG_PATH);
-  await migrateFile(join(process.cwd(), "data", "rssany.db"), join(DATA_DIR, "rssany.db"));
+  await seedExampleConfigsIfMissing();
   if (!(await pathExists(SOURCES_CONFIG_PATH)) && (await pathExists(LEGACY_SUBSCRIPTIONS_PATH))) {
     await migrateFile(LEGACY_SUBSCRIPTIONS_PATH, SOURCES_CONFIG_PATH);
   }

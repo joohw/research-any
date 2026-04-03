@@ -16,7 +16,7 @@ import { registerAdminRoutes } from "./routes/admin.js";
 import { registerRssRoutes } from "./routes/rss.js";
 import { registerWebUiRoutes } from "./webui.js";
 
-const PORT = Number(process.env.PORT) || 3751;
+const PORT = Number(process.env.PORT) || 18473;
 const IS_DEV = process.env.NODE_ENV === "development" || process.argv.includes("--watch");
 const PLUGIN_WATCH_EXTS = [".rssany.js", ".rssany.ts"];
 
