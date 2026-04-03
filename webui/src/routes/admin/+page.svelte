@@ -40,21 +40,20 @@
       links: [
         { href: '/admin/tags', label: '标签', desc: '系统标签库，新入库条目由 LLM 自动匹配打标签' },
         { href: '/admin/pipeline', label: 'Pipeline', desc: '入库前处理（打标签、翻译），支持顺序与开关' },
-        { href: '/admin/plugins', label: '插件', desc: '已加载插件与登录状态' },
       ],
     },
     {
       title: '集成',
       links: [
+        { href: '/admin/llm', label: 'LLM', desc: 'OpenAI 兼容 API（解析、Pipeline、标签与翻译）；可替代 .env 中的 OPENAI_*' },
+        { href: '/admin/proxy', label: '代理', desc: '全局 HTTP(S) 代理；单源在 sources.json 或插件中配置的代理优先' },
         { href: '/admin/deliver', label: '投递', desc: '配置下游 URL；非空时在写库与 Pipeline 后额外 POST 条目' },
       ],
     },
     {
       title: '调试',
       links: [
-        { href: '/admin/logs', label: '日志', desc: '系统运行日志' },
         { href: '/admin/parse', label: 'Parse', desc: '从列表页解析条目，返回 JSON' },
-        { href: '/admin/extractor', label: 'Enrich', desc: '从详情页提取正文，返回 JSON' },
       ],
     },
   ];

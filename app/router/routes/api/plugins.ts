@@ -11,7 +11,7 @@ import { initSources } from "../../../scraper/sources/index.js";
 import { BUILTIN_PLUGINS_DIR, USER_PLUGINS_DIR, PLUGIN_SITE_TEMPLATE_PATH } from "../../../config/paths.js";
 
 const SITE_TEMPLATE_FALLBACK = `/**
- * Site 插件模板（由管理页添加，位于 .rssany/plugins/）
+ * Site 插件模板（由 /plugins 页添加，位于 .rssany/plugins/）
  * HTML DOM 解析请用 ctx.deps.parseHtml，勿在插件内 import node_modules。
  */
 export default {

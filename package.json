@@ -29,9 +29,7 @@
   },
   "scripts": {
     "build": "vite build",
-    "dev": "cross-env NODE_ENV=development NODE_OPTIONS=--no-deprecation tsx app/index.ts",
-    "dev:api": "cross-env NODE_ENV=development NODE_OPTIONS=--no-deprecation tsx app/index.ts",
-    "dev:all": "concurrently -k -n api,web -c blue,magenta \"pnpm dev\" \"pnpm webui:watch\"",
+    "dev": "cd webui && pnpm run build && cd ..  && tsx app/index.ts",
     "start": "node dist/index.js",
     "serve:route": "node scripts/serve-route.mjs",
     "serve:app": "npx tsx app/index.ts",
@@ -41,6 +39,7 @@
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
     "reset": "node scripts/reset.mjs",
+    "proxy-browser": "tsx scripts/proxy-browser.ts",
     "webui:install": "cd webui && npm install",
     "webui:dev": "cd webui && pnpm run dev",
     "webui:build": "cd webui && npm run build",

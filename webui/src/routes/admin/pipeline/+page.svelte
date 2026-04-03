@@ -1,5 +1,6 @@
 <script lang="ts">
   import { PRODUCT_NAME } from '$lib/brand';
+  import BackToParentRoute from '$lib/BackToParentRoute.svelte';
   import { onMount } from 'svelte';
   import { adminFetchJson } from '$lib/adminAuth';
   import { showToast } from '$lib/toastStore.js';
@@ -98,6 +99,7 @@
 <div class="feed-wrap">
   <div class="feed-col">
     <div class="feed-header">
+      <BackToParentRoute />
       <h2>Pipeline</h2>
       <p class="page-desc">
         入库前处理（打标签、翻译），可调整顺序与开关。

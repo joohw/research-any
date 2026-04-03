@@ -4,7 +4,7 @@
 
   /** 旧「新建插件」独立页：改为列表页上的 Dialog，保留此路由以免外链失效 */
   onMount(() => {
-    goto('/admin/plugins?openAdd=1', { replaceState: true });
+    goto('/plugins?openAdd=1', { replaceState: true });
   });
 </script>
 

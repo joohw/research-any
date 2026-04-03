@@ -83,7 +83,10 @@ export function createWebSource(site: Site): Source {
     preCheck: authFlow
       ? async (ctx: SourceContext) => {
           if (!ctx.cacheDir) return;
-          const passed = await preCheckAuth(authFlow, ctx.cacheDir);
+          const passed = await preCheckAuth(authFlow, ctx.cacheDir, {
+            proxy: ctx.proxy,
+            headless: ctx.headless,
+          });
           if (!passed) throw new AuthRequiredError(`站点 ${site.id} 需要登录，请先执行 ensureAuth`);
         }
       : undefined,

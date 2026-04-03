@@ -3,12 +3,33 @@
 import type { Hono } from "hono";
 import { getSource } from "../../scraper/sources/index.js";
 import { buildSourceContext } from "../../scraper/sources/context.js";
-import { getBestSite } from "../../scraper/sources/web/index.js";
 import { extractFromLink } from "../../scraper/sources/web/extractor/index.js";
 import { CACHE_DIR } from "../../config/paths.js";
 import { AuthRequiredError } from "../../scraper/auth/index.js";
 import { parseUrlFromPath, readStaticHtml, escapeHtml } from "../utils.js";
 import { requireAdmin } from "../../auth/middleware.js";
+import { getEffectiveProxyForListUrl } from "../../scraper/subscription/index.js";
+
+/** 与 fetcher `resolveProxy` 一致：调试 query 优先 → sources.json / Source.proxy → 环境变量 */
+function effectiveProxyUsed(override: string | undefined, mergedFromSource: string | undefined): string | undefined {
+  const o = override?.trim();
+  if (o) return o;
+  const s = mergedFromSource?.trim();
+  if (s) return s;
+  return process.env.HTTP_PROXY?.trim() || process.env.HTTPS_PROXY?.trim();
+}
+
+function redactProxyForLog(p: string | undefined): string | null {
+  if (!p) return null;
+  try {
+    const u = new URL(p);
+    if (u.username) u.username = "***";
+    if (u.password) u.password = "***";
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
 
 export function registerAdminRoutes(app: Hono): void {
   async function render401(listUrl: string): Promise<string> {
@@ -21,13 +42,27 @@ export function registerAdminRoutes(app: Hono): void {
     const url = parseUrlFromPath(c.req.path, "/admin/parse");
     if (!url) return c.text("无效 URL，格式: /admin/parse/https://... 或 /admin/parse/example.com/...", 400);
     try {
+      // 调试默认有头浏览器；仅 headless=true|1 时使用无头
       const headlessParam = c.req.query("headless");
-      const headless = headlessParam === "false" || headlessParam === "0" ? false : undefined;
+      const headless = headlessParam === "true" || headlessParam === "1";
+      const proxyOverride = c.req.query("proxy")?.trim();
       const source = getSource(url);
-      const ctx = buildSourceContext({ cacheDir: CACHE_DIR, headless, proxy: source.proxy });
+      const fromSource = await getEffectiveProxyForListUrl(url, source);
+      const ctx = buildSourceContext({
+        cacheDir: CACHE_DIR,
+        headless,
+        proxy: proxyOverride || fromSource,
+      });
       const items = await source.fetchItems(url, ctx);
       const mode = source.id === "generic" ? "generic" : "plugin";
-      return c.json({ items, url, mode, pluginId: source.id });
+      const effective = effectiveProxyUsed(proxyOverride, fromSource);
+      return c.json({
+        items,
+        url,
+        mode,
+        pluginId: source.id,
+        effectiveProxy: redactProxyForLog(effective),
+      });
     } catch (err) {
       if (err instanceof AuthRequiredError) {
         const html = await render401(url);
@@ -43,16 +78,20 @@ export function registerAdminRoutes(app: Hono): void {
     if (!url) return c.text("无效 URL，格式: /admin/extractor/https://... 或 /admin/extractor/example.com/...", 400);
     try {
       const headlessParam = c.req.query("headless");
-      const headless = headlessParam === "false" || headlessParam === "0" ? false : undefined;
-      const site = getBestSite(url);
-      const proxy = site?.proxy;
+      const headless = headlessParam === "true" || headlessParam === "1";
+      const proxyOverride = c.req.query("proxy")?.trim();
+      const source = getSource(url);
+      const fromSource = await getEffectiveProxyForListUrl(url, source);
+      const proxy = proxyOverride || fromSource;
       const result = await extractFromLink(url, {}, { timeoutMs: 60_000, headless, proxy });
+      const effective = effectiveProxyUsed(proxyOverride, fromSource);
       return c.json({
         title: result.title ?? null,
         author: result.author ?? null,
         pubDate: result.pubDate ?? null,
         content: result.content ?? null,
         _extractor: "readability",
+        effectiveProxy: redactProxyForLog(effective),
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

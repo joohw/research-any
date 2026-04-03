@@ -1,6 +1,5 @@
 <script lang="ts">
   /// <reference path="../lucide-svelte.d.ts" />
-  import Coffee from 'lucide-svelte/icons/coffee';
   import Settings from 'lucide-svelte/icons/settings';
   import { siGithub } from 'simple-icons';
   import { page } from '$app/stores';
@@ -13,12 +12,12 @@
     if (
       pathname === '/admin/sources' ||
       pathname === '/admin/tags' ||
-      pathname === '/admin/plugins' ||
-      pathname === '/admin/logs'
+      pathname === '/plugins' ||
+      pathname === '/logs'
     ) {
       return true;
     }
-    if (pathname.startsWith('/admin/plugins/') || pathname.startsWith('/admin/logs/')) return true;
+    if (pathname.startsWith('/plugins/') || pathname.startsWith('/logs/')) return true;
     return false;
   }
 
@@ -26,8 +25,8 @@
   $: mainFillHeight = isMainFillRoute(pathname);
 
   $: navActive = {
-    logs: pathname === '/admin/logs' || pathname.startsWith('/admin/logs/'),
-    plugins: pathname.startsWith('/admin/plugins'),
+    logs: pathname === '/logs' || pathname.startsWith('/logs/'),
+    plugins: pathname.startsWith('/plugins'),
     tags: pathname === '/admin/tags' || pathname.startsWith('/admin/tags/'),
   } as const;
 </script>
@@ -37,12 +36,7 @@
     <header class="topbar">
       <div class="shell topbar-row">
         <div class="topbar-left">
-          <a href="/" class="topbar-brand">
-            <span class="logo-icon" aria-hidden="true">
-              <Coffee size={16} />
-            </span>
-            <span>{PRODUCT_NAME}</span>
-          </a>
+          <a href="/" class="topbar-brand">{PRODUCT_NAME}</a>
           <a
             class="github-link"
             href={GITHUB_REPO_URL}
@@ -59,13 +53,13 @@
         <div class="topbar-end">
           <nav class="topbar-quick" aria-label="后台快捷入口">
             <a
-              href="/admin/logs"
+              href="/logs"
               class="topbar-quick-link"
               class:active={navActive.logs}
               title="运行日志"
             >日志</a>
             <a
-              href="/admin/plugins"
+              href="/plugins"
               class="topbar-quick-link"
               class:active={navActive.plugins}
               title="信源与扩展插件"
@@ -160,13 +154,12 @@
   .topbar-left {
     display: flex;
     align-items: center;
-    gap: 0.65rem;
+    gap: 0.875rem;
     min-width: 0;
   }
   .topbar-brand {
     display: inline-flex;
     align-items: center;
-    gap: 0.45rem;
     font-size: 0.9375rem;
     font-weight: 600;
     letter-spacing: -0.03em;
@@ -175,15 +168,6 @@
   }
   .topbar-brand:hover {
     color: var(--color-primary);
-  }
-  .logo-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1rem;
-    height: 1rem;
-    color: var(--color-muted-foreground);
-    opacity: 0.92;
   }
   .github-link {
     display: inline-flex;

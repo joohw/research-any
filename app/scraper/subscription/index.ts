@@ -4,6 +4,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { SOURCES_CONFIG_PATH } from "../../config/paths.js";
 import type { SubscriptionSource, SourcesFile } from "./types.js";
 import { resolveRef } from "./types.js";
+import type { Source } from "../sources/types.js";
+import { readGlobalProxyFromConfig } from "../../config/globalProxy.js";
 
 export type { SubscriptionSource, SourcesFile } from "./types.js";
 export { resolveRef } from "./types.js";
@@ -64,6 +66,19 @@ export async function saveSourcesFile(sources: SubscriptionSource[]): Promise<vo
   );
 }
 
+
+/**
+ * 代理优先级：sources.json 单源 → 插件 Source.proxy → config.json globalProxy →（未写入则由 fetcher resolveProxy 使用 HTTP_PROXY）
+ */
+export async function getEffectiveProxyForListUrl(listUrl: string, source: Source): Promise<string | undefined> {
+  const list = await getAllSources();
+  const sub = list.find((s) => resolveRef(s) === listUrl);
+  const fromSub = sub?.proxy?.trim();
+  if (fromSub) return fromSub;
+  const fromPlugin = source.proxy?.trim();
+  if (fromPlugin) return fromPlugin;
+  return readGlobalProxyFromConfig();
+}
 
 /** 读取 sources.json 原始内容（用于 GET /api/sources/raw）；旧格式会转为新格式返回 */
 export async function getSourcesRaw(): Promise<string> {

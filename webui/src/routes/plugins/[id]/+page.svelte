@@ -1,14 +1,10 @@
 <script lang="ts">
   import { PRODUCT_NAME } from '$lib/brand';
+  import BackToParentRoute from '$lib/BackToParentRoute.svelte';
   import { adminFetch } from '$lib/adminAuth';
-  import { browser } from '$app/environment';
   import { page } from '$app/stores';
   import { showToast } from '$lib/toastStore.js';
   import PluginCodeEditor from '$lib/components/PluginCodeEditor.svelte';
-
-  function goBack() {
-    if (browser) history.back();
-  }
 
   $: pluginId = $page.params.id ? decodeURIComponent($page.params.id) : '';
 
@@ -89,75 +85,98 @@
   <title>{pluginId ? `${pluginId} · 插件` : '插件'} — {PRODUCT_NAME}</title>
 </svelte:head>
 
-<div class="page">
-  <header class="toolbar">
-    <div class="toolbar-left">
-      <button type="button" class="back" onclick={goBack}>← 返回</button>
-      {#if pluginId}
-        <span class="id-label">{pluginId}</span>
+<div class="feed-wrap">
+  <div class="feed-col">
+    <div class="feed-toolbar-block">
+      <div class="admin-feed-header">
+        <div class="admin-feed-header__left">
+          <BackToParentRoute />
+          <h2>{pluginId || '插件'}</h2>
+          <p class="admin-feed-header__desc plugin-path">
+            {#if !pluginId}
+              缺少插件 id
+            {:else if loading}
+              加载中…
+            {:else if loadError}
+              {loadError}
+            {:else if filePath}
+              {filePath}
+            {:else}
+              —
+            {/if}
+          </p>
+        </div>
+        <div class="admin-feed-header__actions">
+          {#if pluginId && !loading && !loadError}
+            <button
+              type="button"
+              class="admin-toolbar-btn admin-toolbar-btn--primary"
+              disabled={saving || !dirty}
+              on:click={save}
+            >
+              {saving ? '保存中…' : '保存'}
+            </button>
+          {/if}
+        </div>
+      </div>
+    </div>
+
+    <div class="feed-body-scroll">
+      {#if !pluginId}
+        <div class="state">缺少插件 id</div>
+      {:else if loading}
+        <div class="state">加载中…</div>
+      {:else if loadError}
+        <div class="state err">{loadError}</div>
+      {:else}
+        <div class="plugin-editor-area">
+          <div class="editor-wrap">
+            {#key pluginId}
+              <PluginCodeEditor
+                bind:content={content}
+                typescript={filePath.endsWith('.ts')}
+                onedit={onEditorInput}
+              />
+            {/key}
+          </div>
+        </div>
       {/if}
     </div>
-    {#if pluginId && !loading && !loadError}
-      <button type="button" class="btn primary" disabled={saving || !dirty} onclick={save}>
-        {saving ? '保存中…' : '保存'}
-      </button>
-    {/if}
-  </header>
-
-  <div class="plugin-body-scroll">
-    {#if !pluginId}
-      <div class="state">缺少插件 id</div>
-    {:else if loading}
-      <div class="state">加载中…</div>
-    {:else if loadError}
-      <div class="state err">{loadError}</div>
-    {:else}
-      {#if filePath}
-        <p class="path" title={filePath}>{filePath}</p>
-      {/if}
-      <div class="editor-wrap">
-        {#key pluginId}
-          <PluginCodeEditor
-            bind:content={content}
-            typescript={filePath.endsWith('.ts')}
-            onedit={onEditorInput}
-          />
-        {/key}
-      </div>
-    {/if}
   </div>
 </div>
 
 <style>
   /**
-   * 与首页信源列表一致：对消 main padding，工具条固定在顶栏下；仅 `.plugin-body-scroll` 内滚动。
+   * 与标签 / 日志一致：`main.main-fill` 不滚动，仅 `.feed-body-scroll` 内滚动；顶栏为 admin-feed-header。
    */
-  .page {
+  .feed-wrap {
     margin-top: calc(-1 * var(--main-padding-top));
     width: 100%;
-    max-width: 960px;
-    margin-left: auto;
-    margin-right: auto;
+    max-width: 100%;
     display: flex;
     flex-direction: column;
     flex: 1;
     min-height: 0;
     overflow: hidden;
   }
-  .toolbar {
-    flex-shrink: 0;
+
+  .feed-col {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    flex-wrap: nowrap;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    background: transparent;
+  }
+
+  .feed-toolbar-block {
+    flex-shrink: 0;
     padding-top: var(--main-padding-top);
     padding-bottom: var(--feed-sticky-gap-after);
-    padding-inline: 0;
-    border-bottom: 1px solid var(--color-border-muted);
     background: var(--color-background);
   }
-  .plugin-body-scroll {
+
+  .feed-body-scroll {
     flex: 1;
     min-height: 0;
     display: flex;
@@ -167,78 +186,30 @@
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
   }
-  .toolbar-left {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex-wrap: nowrap;
-    min-width: 0;
-    flex: 1;
-  }
-  .back {
-    flex-shrink: 0;
-    font-size: 0.8125rem;
-    color: var(--color-muted-foreground-strong);
-    background: none;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    font-family: inherit;
-  }
-  .back:hover {
-    color: var(--color-primary);
-  }
-  .id-label {
-    font-size: 0.9375rem;
-    font-weight: 600;
-    color: var(--color-foreground);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .path {
-    margin: 0.75rem 0 0;
-    flex-shrink: 0;
+
+  /** 路径：等宽、可换行，与描述区区分 */
+  .plugin-path {
+    font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
     font-size: 0.72rem;
-    font-family: ui-monospace, monospace;
-    color: var(--color-muted-foreground-soft);
     word-break: break-all;
   }
+
+  .plugin-editor-area {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 0;
+    box-sizing: border-box;
+  }
+
   .editor-wrap {
-    margin-top: 0.75rem;
-    flex-shrink: 0;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
-  .toolbar .btn {
-    flex-shrink: 0;
-  }
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.35rem 0.65rem;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    border-radius: 6px;
-    cursor: pointer;
-    border: 1px solid var(--color-border);
-    background: var(--color-muted);
-    color: var(--color-foreground);
-    font-family: inherit;
-    white-space: nowrap;
-  }
-  .btn.primary {
-    background: var(--color-primary);
-    color: var(--color-primary-foreground);
-    border: none;
-  }
-  .btn.primary:hover:not(:disabled) {
-    background: var(--color-primary-hover);
-    opacity: 0.95;
-  }
-  .btn:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
+
   .state {
     flex: 1;
     display: flex;

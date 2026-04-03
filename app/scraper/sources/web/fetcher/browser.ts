@@ -13,12 +13,15 @@ import { logger } from "../../../../core/logger/index.js";
 
 const execAsync = promisify(exec);
 
+/** 与 launchArgs / setViewport 一致；无头拉高便于长页与懒加载内容 */
+const VIEWPORT_WIDTH = 1366;
+const VIEWPORT_HEIGHT_HEADLESS = 5000;
+const VIEWPORT_HEIGHT_HEADFUL = 1200;
 
-/** 解析代理：优先 config.proxy，否则从 HTTP_PROXY/HTTPS_PROXY 读取 */
-function resolveProxy(config?: { proxy?: string }): string | undefined {
+/** 解析代理：显式传入的 proxy，否则 HTTP_PROXY / HTTPS_PROXY */
+export function resolveProxy(config?: { proxy?: string }): string | undefined {
   return config?.proxy ?? process.env.HTTP_PROXY ?? process.env.HTTPS_PROXY;
 }
-
 
 /** 从代理字符串解析出 serverUrl 和可选账号密码；支持 http://user:pass@host:port */
 function parseProxy(proxy: string): { serverUrl: string; username?: string; password?: string } {
@@ -27,6 +30,16 @@ function parseProxy(proxy: string): { serverUrl: string; username?: string; pass
   const username = u.username || undefined;
   const password = u.password || undefined;
   return { serverUrl, username, password };
+}
+
+/** 在 Page 上设置代理认证（与 preCheckAuth / fetchHtml 一致；需与 launchBrowser 的 proxy 同时使用） */
+export async function applyProxyAuthToPage(page: Page, opts?: { proxy?: string }): Promise<void> {
+  const proxy = resolveProxy(opts);
+  if (!proxy) return;
+  const { username, password } = parseProxy(proxy);
+  if (username !== undefined || password !== undefined) {
+    await page.authenticate({ username: username ?? "", password: password ?? "" });
+  }
 }
 
 
@@ -42,8 +55,8 @@ function launchArgs(config?: { proxy?: string; headless?: boolean }): string[] {
     "--disable-site-isolation-trials",
     "--disable-infobars",
   ];
-  const height = config?.headless !== false ? 5000 : 960;
-  base.push(`--window-size=1366,${height}`);
+  const height = config?.headless !== false ? VIEWPORT_HEIGHT_HEADLESS : VIEWPORT_HEIGHT_HEADFUL;
+  base.push(`--window-size=${VIEWPORT_WIDTH},${height}`);
   const proxy = resolveProxy(config);
   if (proxy) {
     const { serverUrl } = parseProxy(proxy);
@@ -166,19 +179,16 @@ async function setupPage(page: Page, headless = true): Promise<void> {
   const realUserAgent =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
   await page.setUserAgent(realUserAgent);
-  await page.setViewport({ width: 1366, height: headless ? 5000 : 960 });
+  await page.setViewport({
+    width: VIEWPORT_WIDTH,
+    height: headless ? VIEWPORT_HEIGHT_HEADLESS : VIEWPORT_HEIGHT_HEADFUL,
+  });
   await stealthPage(page);
 }
 
 
-// ─── 浏览器单例 ───────────────────────────────────────────────────────────────
-// 全局只保持一个浏览器进程。所有请求（无头/有头）均在此浏览器内开新 Tab。
-// 有头请求到来时若当前是无头浏览器，则关闭并重开有头浏览器（反之亦然）。
-
-let _browser: Browser | null = null;
-let _browserHeadless = true;
-let _launchPromise: Promise<Browser> | null = null;
-
+// ─── 浏览器：单发模式 ─────────────────────────────────────────────────────────
+// 每次任务独立启动 Chrome，用毕在调用方 `browser.close()`；不保留全局单例，不跨请求复用 Tab。
 
 /** 是否为「frame 已分离」类错误（页面发生客户端导航/重定向导致主 frame 失效） */
 function isFrameDetachedError(e: unknown): boolean {
@@ -187,163 +197,136 @@ function isFrameDetachedError(e: unknown): boolean {
 }
 
 
-/** 判断浏览器是否健在 */
-async function isBrowserAlive(): Promise<boolean> {
-  if (!_browser) return false;
-  try {
-    await _browser.version();
-    return true;
-  } catch {
-    _browser = null;
-    return false;
-  }
-}
-
-
 /**
- * 获取（或启动）浏览器单例。
- * - 若浏览器已运行且模式匹配 → 直接返回
- * - 若浏览器已运行但模式不匹配（无头↔有头）→ 关闭后重开
- * - 若浏览器未运行 → 启动新实例
+ * 启动新的 Chrome 实例（不缓存、不复用）。调用方须在 `finally` 中 `await browser.close()`。
  */
-export async function getOrCreateBrowser(config: {
+export async function launchBrowser(config: {
   headless?: boolean;
   cacheDir?: string;
   proxy?: string;
   chromeExecutablePath?: string;
 }): Promise<Browser> {
   const wantHeadless = config.headless !== false;
-  // 浏览器已运行
-  if (await isBrowserAlive()) {
-    // 模式一致：直接复用
-    if (_browserHeadless === wantHeadless) {
-      return _browser!;
-    }
-    // 模式不一致（无头→有头 或 有头→无头）：关闭后重开
-    logger.info("scraper", "浏览器切换模式", { from: _browserHeadless ? "无头" : "有头", to: wantHeadless ? "无头" : "有头" });
-    await _browser!.close().catch(() => {});
-    _browser = null;
-    _launchPromise = null;
+  const executablePath = config.chromeExecutablePath ?? process.env.CHROME_PATH ?? findChromeExecutable();
+  if (!executablePath) {
+    throw new Error("未找到 Chrome 可执行文件，请安装 Google Chrome 或设置 CHROME_PATH 环境变量");
   }
-  // 防止并发重复启动
-  if (!_launchPromise) {
-    _launchPromise = (async () => {
-      const executablePath = config.chromeExecutablePath ?? process.env.CHROME_PATH ?? findChromeExecutable();
-      if (!executablePath) {
-        throw new Error("未找到 Chrome 可执行文件，请安装 Google Chrome 或设置 CHROME_PATH 环境变量");
+  const userDataDir = getUserDataDir(config.cacheDir);
+  const maxRetries = 2;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt === 0 && userDataDir) {
+        const absUserDataDir = resolve(userDataDir);
+        await killStaleChromeProcesses(absUserDataDir);
       }
-      const userDataDir = getUserDataDir(config.cacheDir);
-      const maxRetries = 2;
-      let lastErr: unknown;
-      for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        try {
-          if (attempt === 0 && userDataDir) {
-            const absUserDataDir = resolve(userDataDir);
-            await killStaleChromeProcesses(absUserDataDir);
-          }
-          if (attempt > 0) {
-            const waitMs = attempt * 2000;
-            logger.info("scraper", "userDataDir 曾被占用，等待后重试", { waitMs, attempt });
-            await new Promise((r) => setTimeout(r, waitMs));
-          }
-          logger.info("scraper", "启动 Chrome", { headless: wantHeadless, executablePath });
-          const browser = await puppeteerCore.launch({
-            headless: wantHeadless,
-            args: launchArgs({ proxy: config.proxy, headless: wantHeadless }),
-            userDataDir,
-            executablePath,
-            ignoreDefaultArgs: ["--enable-automation"],
-          });
-          browser.on("disconnected", () => {
-            _browser = null;
-            _launchPromise = null;
-          });
-          _browser = browser;
-          _browserHeadless = wantHeadless;
-          return browser;
-        } catch (e) {
-          lastErr = e;
-          if (attempt < maxRetries && isAlreadyRunningError(e)) {
-            continue;
-          }
-          if (isAlreadyRunningError(e)) {
-            const dir = userDataDir ?? "browser_data/main";
-            throw new Error(
-              `Chrome 的 profile 目录已被占用（${dir}）。通常是因为上次未正常退出或同时运行了多个本服务实例。请关闭占用该目录的 Chrome 进程后重试，或设置环境变量 CACHE_DIR 使用不同缓存目录。`
-            );
-          }
-          throw e;
-        }
+      if (attempt > 0) {
+        const waitMs = attempt * 2000;
+        logger.info("scraper", "userDataDir 曾被占用，等待后重试", { waitMs, attempt });
+        await new Promise((r) => setTimeout(r, waitMs));
       }
-      throw lastErr;
-    })().catch((e) => {
-      _launchPromise = null;
+      return await puppeteerCore.launch({
+        headless: wantHeadless,
+        args: launchArgs({ proxy: config.proxy, headless: wantHeadless }),
+        userDataDir,
+        executablePath,
+        ignoreDefaultArgs: ["--enable-automation"],
+      });
+    } catch (e) {
+      lastErr = e;
+      if (attempt < maxRetries && isAlreadyRunningError(e)) {
+        continue;
+      }
+      if (isAlreadyRunningError(e)) {
+        const dir = userDataDir ?? "browser_data/main";
+        throw new Error(
+          `Chrome 的 profile 目录已被占用（${dir}）。通常是因为上次未正常退出或同时运行了多个本服务实例。请关闭占用该目录的 Chrome 进程后重试，或设置环境变量 CACHE_DIR 使用不同缓存目录。`
+        );
+      }
       throw e;
-    });
+    }
   }
-  return _launchPromise;
+  throw lastErr;
 }
 
 
-// 进程退出时关闭浏览器，防止僵尸进程
-process.once("exit", () => { _browser?.close().catch(() => {}); });
-process.once("SIGINT", async () => { await _browser?.close().catch(() => {}); process.exit(0); });
-process.once("SIGTERM", async () => { await _browser?.close().catch(() => {}); process.exit(0); });
+/** @deprecated 使用 `launchBrowser`；行为与单发启动一致，不再复用全局实例 */
+export const getOrCreateBrowser = launchBrowser;
 
 
 // ─── 对外 API ─────────────────────────────────────────────────────────────────
 
-/** 预检认证：复用共享浏览器（新开 Tab）检查是否已登录 */
-export async function preCheckAuth(authFlow: AuthFlow, cacheDir: string): Promise<boolean> {
+/** 预检认证：单发浏览器（新开 Tab）检查是否已登录；opts 与 fetchHtml 一致（代理、有头/无头） */
+export async function preCheckAuth(
+  authFlow: AuthFlow,
+  cacheDir: string,
+  opts?: { proxy?: string; headless?: boolean }
+): Promise<boolean> {
   const { checkAuth, loginUrl, domain } = authFlow;
   if (domain == null || !cacheDir) return true;
-  const browser = await getOrCreateBrowser({ headless: true, cacheDir });
-  const page = await browser.newPage();
+  const isHeadless = opts?.headless !== false;
+  const browser = await launchBrowser({
+    headless: isHeadless,
+    cacheDir,
+    proxy: resolveProxy(opts),
+  });
   try {
-    await setupPage(page, true);
-    await page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    return await checkAuth(page, page.url());
+    const page = await browser.newPage();
+    try {
+      await setupPage(page, isHeadless);
+      await applyProxyAuthToPage(page, opts);
+      await page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      return await checkAuth(page, page.url());
+    } finally {
+      await page.close().catch(() => {});
+    }
   } finally {
-    await page.close().catch(() => {});
+    await browser.close().catch(() => {});
   }
 }
 
 
-// 执行认证流程：用有头浏览器（若无头在运行则切换）打开登录页，等待用户完成登录
+// 执行认证流程：单发有头浏览器打开登录页，等待用户完成登录后关闭进程
 export async function ensureAuth(
   authFlow: AuthFlow,
-  cacheDir: string
+  cacheDir: string,
+  opts?: { proxy?: string }
 ): Promise<void> {
   const { checkAuth, loginUrl, loginTimeoutMs = 60 * 1000, pollIntervalMs = 2000 } = authFlow;
-  const browser = await getOrCreateBrowser({ headless: false, cacheDir });
-  const page = await browser.newPage();
+  const browser = await launchBrowser({ headless: false, cacheDir, proxy: resolveProxy(opts) });
   try {
-    await setupPage(page, false);
-    await page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    const authenticated = await checkAuth(page, page.url());
-    if (authenticated) return;
-    const startTime = Date.now();
-    while (Date.now() - startTime < loginTimeoutMs) {
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    const page = await browser.newPage();
+    try {
+      await setupPage(page, false);
+      await applyProxyAuthToPage(page, opts);
+      await page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await new Promise((resolve) => setTimeout(resolve, 3000));
       const authenticated = await checkAuth(page, page.url());
       if (authenticated) return;
+      const startTime = Date.now();
+      while (Date.now() - startTime < loginTimeoutMs) {
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+        const authenticated = await checkAuth(page, page.url());
+        if (authenticated) return;
+      }
+      throw new Error(`登录超时（${loginTimeoutMs}ms）`);
+    } finally {
+      await page.close().catch(() => {});
     }
-    throw new Error(`登录超时（${loginTimeoutMs}ms）`);
   } finally {
-    await page.close().catch(() => {});
+    await browser.close().catch(() => {});
   }
 }
 
 
-// 使用浏览器单例打开页面并返回结构化 HTML 结果；每次请求开新 Tab，用完关 Tab
+// 单发浏览器：本次任务内最多开两个 Tab（frame 分离时重试一次），结束后关闭 Chrome
 // 若发生「Navigating frame was detached」等 frame 分离错误（常见于 SPA 客户端跳转），会换新 Tab 重试一次，并用 domcontentloaded 尽快取 HTML
 export async function fetchHtml(url: string, config: RequestConfig = {}): Promise<StructuredHtmlResult> {
   const { timeoutMs, headers, cookies, cacheDir, checkAuth, authFlow, purify, headless, waitAfterLoadMs, waitForSelector, waitForSelectorTimeoutMs } =
     config;
   const isHeadless = headless !== false;
-  const browser = await getOrCreateBrowser({
+  const browser = await launchBrowser({
     headless: isHeadless,
     cacheDir,
     proxy: resolveProxy(config),
@@ -353,67 +336,71 @@ export async function fetchHtml(url: string, config: RequestConfig = {}): Promis
   const maxAttempts = 2;
   let lastError: unknown;
 
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const page = await browser.newPage();
-    const isRetry = attempt === 1;
-    // 重试时用 domcontentloaded 尽快取 HTML，减少 SPA 客户端跳转在取 content 前发生的概率
-    const waitUntil = isRetry ? "domcontentloaded" : "load";
-    const extraWaitMs = isRetry ? Math.min(500, Math.max(0, waitAfterLoadMs ?? 2000)) : Math.max(0, waitAfterLoadMs ?? 2000);
-    try {
-      if (config.browserContext) {
-        await config.browserContext(page.browserContext());
-      }
-      await setupPage(page, isHeadless);
-      const extraHeaders: Record<string, string> = { "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8", ...(headers ?? {}) };
-      if (cookies != null && cookies !== "") {
-        extraHeaders.cookie = cookies;
-      }
-      await page.setExtraHTTPHeaders(extraHeaders);
-      const proxy = resolveProxy(config);
-      if (proxy) {
-        const { username, password } = parseProxy(proxy);
-        if (username !== undefined || password !== undefined) {
-          await page.authenticate({ username: username ?? "", password: password ?? "" });
+  try {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const page = await browser.newPage();
+      const isRetry = attempt === 1;
+      // 重试时用 domcontentloaded 尽快取 HTML，减少 SPA 客户端跳转在取 content 前发生的概率
+      const waitUntil = isRetry ? "domcontentloaded" : "load";
+      const extraWaitMs = isRetry ? Math.min(500, Math.max(0, waitAfterLoadMs ?? 2000)) : Math.max(0, waitAfterLoadMs ?? 2000);
+      try {
+        if (config.browserContext) {
+          await config.browserContext(page.browserContext());
         }
-      }
-      if (timeoutMs != null) {
-        await page.setDefaultNavigationTimeout(timeoutMs);
-      }
-      const response = await page.goto(url, { waitUntil, timeout: navigationTimeout });
-      if (extraWaitMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, extraWaitMs));
-      }
-      if (waitForSelector != null && waitForSelector !== "" && !isRetry) {
-        const selectorTimeout = waitForSelectorTimeoutMs ?? 20000;
-        await page.waitForSelector(waitForSelector, { timeout: selectorTimeout });
-      }
-      if (checkAuth != null || authFlow != null) {
-        const authCheck = checkAuth ?? authFlow?.checkAuth;
-        if (authCheck != null) {
-          const ok = await authCheck(page, url);
-          if (!ok) {
-            throw new Error("checkAuth failed: 未通过认证检查，请先调用 ensureAuth 进行预处理登录");
+        await setupPage(page, isHeadless);
+        const extraHeaders: Record<string, string> = { "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8", ...(headers ?? {}) };
+        if (cookies != null && cookies !== "") {
+          extraHeaders.cookie = cookies;
+        }
+        await page.setExtraHTTPHeaders(extraHeaders);
+        const proxy = resolveProxy(config);
+        if (proxy) {
+          const { username, password } = parseProxy(proxy);
+          if (username !== undefined || password !== undefined) {
+            await page.authenticate({ username: username ?? "", password: password ?? "" });
           }
         }
+        if (timeoutMs != null) {
+          await page.setDefaultNavigationTimeout(timeoutMs);
+        }
+        const response = await page.goto(url, { waitUntil, timeout: navigationTimeout });
+        if (extraWaitMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, extraWaitMs));
+        }
+        if (waitForSelector != null && waitForSelector !== "" && !isRetry) {
+          const selectorTimeout = waitForSelectorTimeoutMs ?? 20000;
+          await page.waitForSelector(waitForSelector, { timeout: selectorTimeout });
+        }
+        if (checkAuth != null || authFlow != null) {
+          const authCheck = checkAuth ?? authFlow?.checkAuth;
+          if (authCheck != null) {
+            const ok = await authCheck(page, url);
+            if (!ok) {
+              throw new Error("checkAuth failed: 未通过认证检查，请先调用 ensureAuth 进行预处理登录");
+            }
+          }
+        }
+        const rawBody = await page.content();
+        const finalUrl = response?.url() ?? page.url() ?? String(url);
+        const status = response?.status() ?? 0;
+        const statusText = response?.statusText() ?? "";
+        const rawHeaders = response?.headers() ?? {};
+        const normalizedHeaders = headersToRecord(rawHeaders);
+        const body = applyPurify(rawBody, purify);
+        await page.close().catch(() => {});
+        return { finalUrl, status, statusText, headers: normalizedHeaders, body };
+      } catch (e) {
+        lastError = e;
+        await page.close().catch(() => {});
+        if (isRetry || !isFrameDetachedError(e)) {
+          throw e;
+        }
+        logger.warn("scraper", "fetchHtml 因 frame 分离重试", { url, attempt: attempt + 1, err: e instanceof Error ? e.message : String(e) });
+        await new Promise((r) => setTimeout(r, 800));
       }
-      const rawBody = await page.content();
-      const finalUrl = response?.url() ?? page.url() ?? String(url);
-      const status = response?.status() ?? 0;
-      const statusText = response?.statusText() ?? "";
-      const rawHeaders = response?.headers() ?? {};
-      const normalizedHeaders = headersToRecord(rawHeaders);
-      const body = applyPurify(rawBody, purify);
-      await page.close().catch(() => {});
-      return { finalUrl, status, statusText, headers: normalizedHeaders, body };
-    } catch (e) {
-      lastError = e;
-      await page.close().catch(() => {});
-      if (isRetry || !isFrameDetachedError(e)) {
-        throw e;
-      }
-      logger.warn("scraper", "fetchHtml 因 frame 分离重试", { url, attempt: attempt + 1, err: e instanceof Error ? e.message : String(e) });
-      await new Promise((r) => setTimeout(r, 800));
     }
+    throw lastError;
+  } finally {
+    await browser.close().catch(() => {});
   }
-  throw lastError;
 }

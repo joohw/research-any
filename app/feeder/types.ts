@@ -31,14 +31,15 @@ export interface FeederConfig {
   cacheDir?: string;
   /** 保留字段；正文由信源 `fetchItems` 内完成，不再单独异步补全 */
   includeContent?: boolean;
-  /** 是否使用无头浏览器，默认 true；设为 false 时使用有头浏览器（可视化） */
+  /**
+   * 是否使用无头浏览器。未指定时：定时/常规抓取默认无头；`force: true`（主动拉取）默认有头。
+   * 仅显式 `headless: true` 可在主动拉取时强制无头。
+   */
   headless?: boolean;
   /** 调用方传入的 cron 表达式：有值时优先于 refreshInterval，缓存键策略由 cron 派生 */
   cron?: string;
   /** 调用方传入的有效时间窗口覆盖：cron 未设时使用，覆盖 source 声明 */
   refreshInterval?: RefreshInterval;
-  /** 调用方传入的代理覆盖：优先级最高，覆盖 source 声明 */
-  proxy?: string;
   /** 目标语种（BCP 47，如 zh-CN、en）；有值时 RSS/API 优先使用 item.translations[lng] */
   lng?: string;
   /** 为 true 时跳过 generatingKeys 去重，强制发起独立抓取（手动触发时使用） */

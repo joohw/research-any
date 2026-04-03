@@ -1,12 +1,41 @@
 <script lang="ts">
   import { PRODUCT_NAME } from '$lib/brand';
+  import BackToParentRoute from '$lib/BackToParentRoute.svelte';
   let urlInput = '';
-  let headful = false;
+  let proxyInput = '';
+  let loading = false;
+  let errorText = '';
+  let resultText = '';
 
-  function go() {
+  async function go() {
     if (!urlInput.trim()) return;
-    const fullUrl = urlInput.startsWith('http') ? urlInput : 'https://' + urlInput;
-    window.open('/admin/parse/' + encodeURIComponent(fullUrl) + (headful ? '?headless=false' : ''), '_blank');
+    loading = true;
+    errorText = '';
+    resultText = '';
+    try {
+      const fullUrl = urlInput.startsWith('http') ? urlInput : 'https://' + urlInput;
+      const q = new URLSearchParams();
+      const p = proxyInput.trim();
+      if (p) q.set('proxy', p);
+      const qs = q.toString();
+      const res = await fetch('/admin/parse/' + encodeURIComponent(fullUrl) + (qs ? '?' + qs : ''), {
+        credentials: 'include',
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        errorText = text || `HTTP ${res.status}`;
+        return;
+      }
+      try {
+        resultText = JSON.stringify(JSON.parse(text), null, 2);
+      } catch {
+        resultText = text;
+      }
+    } catch (e) {
+      errorText = e instanceof Error ? e.message : String(e);
+    } finally {
+      loading = false;
+    }
   }
 </script>
 
@@ -15,6 +44,9 @@
 </svelte:head>
 
 <div class="main">
+  <div class="parse-back-row">
+    <BackToParentRoute />
+  </div>
   <div class="hero">
     <p class="hero-eyebrow">开发工具</p>
     <h1 class="hero-title">Parse</h1>
@@ -31,20 +63,37 @@
           required
           autocomplete="url"
         />
-        <button type="submit">解析</button>
+        <button type="submit" disabled={loading}>{loading ? '解析中…' : '解析'}</button>
       </div>
-      <div class="form-opts">
-        <label>
-          <input type="checkbox" bind:checked={headful} />
-          Headful
-        </label>
-        <span class="hint">勾选后可观察实际加载过程</span>
+      <div class="proxy-row">
+        <input
+          type="text"
+          bind:value={proxyInput}
+          placeholder="代理（可选），如 http://127.0.0.1:7890 — 覆盖信源与 HTTP_PROXY"
+          autocomplete="off"
+          spellcheck="false"
+        />
       </div>
     </form>
   </div>
 
+  {#if errorText}
+    <div class="result-error" role="alert">{errorText}</div>
+  {/if}
+  {#if resultText}
+    <div class="result-wrap">
+      <p class="result-label">解析结果（与下方接口一致）</p>
+      <pre class="result-json">{resultText}</pre>
+    </div>
+  {/if}
+
   <div class="info-box">
-    调用 <code>GET /admin/parse/{'{url}'}</code>，使用站点插件的自定义 Parser（若有），否则回退到 LLM 解析。返回条目列表 JSON，可用于验证 Parser 规则是否正确识别标题、链接、摘要等字段。
+    <p>
+      抓取在<strong>服务端</strong>执行，默认<strong>有头</strong> Chrome（与信源同一套 Puppeteer），会弹出可见窗口；本页 <code>fetch</code> 仅用于展示 JSON。需要无头时在 URL 加 <code>?headless=true</code>。
+    </p>
+    <p class="info-note">
+      返回中的 <code>effectiveProxy</code> 为本次抓取实际选用的代理。若需在看得到的窗口里验证出口 IP，请在该 Puppeteer 窗口内打开 <code>api.ipify.org</code> 等（勿用本机普通浏览器标签测代理）。
+    </p>
   </div>
 </div>
 
@@ -54,6 +103,11 @@
     flex-direction: column;
     align-items: center;
     padding: 4rem 1.5rem 3rem;
+  }
+  .parse-back-row {
+    align-self: flex-start;
+    width: 100%;
+    max-width: 520px;
   }
   .hero { text-align: center; margin-bottom: 2.25rem; }
   .hero-eyebrow {
@@ -104,25 +158,67 @@
     white-space: nowrap;
     transition: background 0.15s;
   }
-  .url-row button:hover { background: var(--color-primary-hover); }
+  .url-row button:hover:not(:disabled) { background: var(--color-primary-hover); }
+  .url-row button:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
 
-  .form-opts { display: flex; align-items: center; gap: 0.5rem; padding-left: 0.25rem; }
-  .form-opts label {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
+  .result-error {
+    margin-top: 1rem;
+    width: 100%;
+    max-width: 720px;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--color-destructive, #c00) 12%, transparent);
+    color: var(--color-foreground);
     font-size: 0.8125rem;
-    cursor: pointer;
-    color: var(--color-muted-foreground-strong);
-    user-select: none;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
-  .form-opts input[type='checkbox'] {
-    margin: 0;
-    accent-color: var(--color-primary);
+  .result-wrap {
+    margin-top: 1rem;
+    width: 100%;
+    max-width: 720px;
   }
-  .hint {
-    font-size: 0.775rem;
+  .result-label {
+    font-size: 0.75rem;
+    font-weight: 600;
     color: var(--color-muted-foreground);
+    margin: 0 0 0.4rem;
+  }
+  .result-json {
+    margin: 0;
+    padding: 1rem;
+    max-height: min(70vh, 520px);
+    overflow: auto;
+    font-size: 0.75rem;
+    line-height: 1.45;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-input);
+    background: var(--color-muted);
+    color: var(--color-foreground);
+  }
+
+  .proxy-row {
+    margin-bottom: 0.75rem;
+  }
+  .proxy-row input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.55rem 1rem;
+    border: 1px solid var(--color-input);
+    border-radius: var(--radius-md);
+    font-size: 0.8125rem;
+    outline: none;
+    transition: border 0.15s, box-shadow 0.15s;
+    background: var(--color-card-elevated);
+    color: var(--color-foreground);
+    font-family: ui-monospace, monospace;
+  }
+  .proxy-row input:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--color-primary-light);
   }
 
   .info-box {
@@ -136,6 +232,16 @@
     font-size: 0.8rem;
     color: var(--color-muted-foreground-strong);
     line-height: 1.7;
+  }
+  .info-box p {
+    margin: 0 0 0.65rem;
+  }
+  .info-box p:last-child {
+    margin-bottom: 0;
+  }
+  .info-note {
+    color: var(--color-muted-foreground);
+    font-size: 0.78rem;
   }
   .info-box code {
     background: var(--color-muted);

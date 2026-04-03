@@ -13,6 +13,8 @@ import { registerAdminApiRoutes } from "./admin.js";
 import { registerSourcesRoutes } from "./sources.js";
 import { registerTopicsRoutes } from "./topics.js";
 import { registerDeliverRoutes } from "./deliver.js";
+import { registerLlmRoutes } from "./llm.js";
+import { registerProxySettingsRoutes } from "./proxy.js";
 import { registerTasksRoutes } from "./tasks.js";
 
 export function registerApiRoutes(app: Hono): void {
@@ -28,5 +30,7 @@ export function registerApiRoutes(app: Hono): void {
   registerSourcesRoutes(app);
   registerTopicsRoutes(app);
   registerDeliverRoutes(app);
+  registerLlmRoutes(app);
+  registerProxySettingsRoutes(app);
   registerTasksRoutes(app);
 }

@@ -10,7 +10,7 @@ import { refreshIntervalToCron } from "../../utils/refreshInterval.js";
 import * as scheduler from "../../scheduler/index.js";
 
 const DEFAULT_REFRESH: RefreshInterval = "1day";
-const SOURCES_CONCURRENCY = 5;
+const SOURCES_CONCURRENCY = 1;
 
 function createPullTask(ref: string, cacheDir: string, cronExpr: string): scheduler.ScheduledTask {
   return async () => {
@@ -54,7 +54,7 @@ async function rescheduleSources(cacheDir: string, runNow: boolean): Promise<voi
 }
 
 export async function initScheduler(cacheDir: string): Promise<void> {
-  await rescheduleSources(cacheDir, true);
+  await rescheduleSources(cacheDir, false);
   let debounceTimer: NodeJS.Timeout | null = null;
   try {
     const watcher = watch(SOURCES_CONFIG_PATH, () => {

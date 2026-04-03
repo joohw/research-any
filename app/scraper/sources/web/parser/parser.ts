@@ -151,7 +151,7 @@ export async function parseHtml(html: string, config: ParserConfig = {}): Promis
   const actualMode = mode ?? (llmConfig != null ? "llm" : customParser != null ? "custom" : "llm");
   if (actualMode === "llm") {
     if (llmConfig == null && !getLLMConfig().apiKey) {
-      throw new Error('mode 为 "llm" 时必须提供 llmConfig 或设置 OPENAI_API_KEY 环境变量');
+      throw new Error('mode 为 "llm" 时必须提供 llmConfig，或在后台「设置 → LLM」/ OPENAI_API_KEY 中配置 Key');
     }
     const htmlForLLM = applyPurify(html, purify !== false);
     entries = await parseWithLLM(htmlForLLM, url, llmConfig ?? {});

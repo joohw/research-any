@@ -17,7 +17,15 @@ import type { PipelineContext } from "../pipeline/index.js";
 import { logger } from "../core/logger/index.js";
 import { getDeliverUrl } from "../config/deliver.js";
 import { postDeliverItemsSafe } from "../deliver/post.js";
+import { getEffectiveProxyForListUrl } from "../scraper/subscription/index.js";
 
+/** 主动拉取默认有头；仅显式 headless:true 时用无头；其余场景沿用 config.headless */
+function resolveHeadlessForFeeder(config: FeederConfig): boolean | undefined {
+  if (config.force === true) {
+    return config.headless === true ? true : false;
+  }
+  return config.headless;
+}
 
 /** 根据 listUrl + items 构建 RssChannel（与 generateAndCache 一致，用于缓存命中时实时生成 XML）；lng 存在时设置 channel.language */
 function buildChannelFromItems(listUrl: string, items: FeedItem[], lng?: string | null): RssChannel {
@@ -64,10 +72,16 @@ async function runPipelineOnItem(item: FeedItem, ctx: { sourceUrl: string }): Pr
 
 
 /** 执行生成流程：抓取 → 入库 → 对新条目跑 pipeline → 更新库 */
-async function generateAndCache(listUrl: string, key: string, config: FeederConfig): Promise<{ items: FeedItem[] }> {
-  const { cacheDir = "cache", headless } = config;
+async function generateAndCache(
+  listUrl: string,
+  key: string,
+  config: FeederConfig,
+  proxy: string | undefined,
+): Promise<{ items: FeedItem[] }> {
+  const { cacheDir = "cache" } = config;
+  const headless = resolveHeadlessForFeeder(config);
   const source = getSource(listUrl);
-  const ctx = buildSourceContext({ cacheDir, headless, proxy: config.proxy ?? source.proxy });
+  const ctx = buildSourceContext({ cacheDir, headless, proxy });
   let items: FeedItem[];
   try {
     items = await source.fetchItems(listUrl, ctx);
@@ -127,6 +141,8 @@ async function generateAndCache(listUrl: string, key: string, config: FeederConf
 /** 根据 list URL 获取条目列表：按 cron 或 refresh 策略生成时间窗口 key 用于去重，每次均重新抓取 */
 export async function getItems(listUrl: string, config: FeederConfig = {}): Promise<{ items: FeedItem[]; fromCache: boolean }> {
   const source = getSource(listUrl);
+  const proxy = await getEffectiveProxyForListUrl(listUrl, source);
+  const headless = resolveHeadlessForFeeder(config);
   const key = config.cron
     ? cacheKeyFromCron(listUrl, config.cron)
     : cacheKey(listUrl, config.refreshInterval ?? source.refreshInterval ?? "1day");
@@ -135,8 +151,8 @@ export async function getItems(listUrl: string, config: FeederConfig = {}): Prom
       await source.preCheck(
         buildSourceContext({
           cacheDir: config.cacheDir ?? "cache",
-          headless: config.headless,
-          proxy: config.proxy ?? source.proxy,
+          headless,
+          proxy,
         }),
       );
     } catch (err) {
@@ -146,7 +162,7 @@ export async function getItems(listUrl: string, config: FeederConfig = {}): Prom
   }
   let task = config.force ? undefined : generatingKeys.get(key);
   if (!task) {
-    task = generateAndCache(listUrl, key, config);
+    task = generateAndCache(listUrl, key, config, proxy);
     if (!config.force) generatingKeys.set(key, task);
   }
   const { items } = await task;

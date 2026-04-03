@@ -5,7 +5,12 @@
   import { adminFetchJson } from '$lib/adminAuth';
   import { showToast } from '$lib/toastStore.js';
 
-  let url = '';
+  let baseUrl = '';
+  let model = '';
+  /** 新 Key；留空表示不修改已保存的 Key */
+  let apiKeyInput = '';
+  let hasApiKey = false;
+  let apiKeyInFile = false;
   let loading = true;
   let saving = false;
   let testing = false;
@@ -13,10 +18,22 @@
   async function load() {
     loading = true;
     try {
-      const data = await adminFetchJson<{ url?: string }>('/api/deliver');
-      url = data?.url ?? '';
+      const data = await adminFetchJson<{
+        baseUrl?: string;
+        model?: string;
+        hasApiKey?: boolean;
+        apiKeyInFile?: boolean;
+      }>('/api/llm');
+      baseUrl = data?.baseUrl ?? '';
+      model = data?.model ?? '';
+      hasApiKey = !!data?.hasApiKey;
+      apiKeyInFile = !!data?.apiKeyInFile;
+      apiKeyInput = '';
     } catch {
-      url = '';
+      baseUrl = '';
+      model = '';
+      hasApiKey = false;
+      apiKeyInFile = false;
     } finally {
       loading = false;
     }
@@ -25,13 +42,31 @@
   async function save() {
     saving = true;
     try {
-      const data = await adminFetchJson<{ ok?: boolean; message?: string; url?: string }>('/api/deliver', {
+      const body: Record<string, unknown> = {
+        baseUrl: baseUrl.trim(),
+        model: model.trim(),
+      };
+      const trimmed = apiKeyInput.trim();
+      if (trimmed) body.apiKey = trimmed;
+
+      const data = await adminFetchJson<{
+        ok?: boolean;
+        message?: string;
+        baseUrl?: string;
+        model?: string;
+        hasApiKey?: boolean;
+        apiKeyInFile?: boolean;
+      }>('/api/llm', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify(body),
       });
       if (!data?.ok) throw new Error(data?.message ?? '保存失败');
-      url = data?.url ?? url;
+      baseUrl = data?.baseUrl ?? baseUrl;
+      model = data?.model ?? model;
+      hasApiKey = !!data?.hasApiKey;
+      apiKeyInFile = !!data?.apiKeyInFile;
+      apiKeyInput = '';
       showToast('已保存', 'success');
     } catch (e) {
       showToast('保存失败: ' + (e instanceof Error ? e.message : String(e)), 'error');
@@ -41,22 +76,18 @@
   }
 
   async function test() {
-    const target = url.trim();
-    if (!target) {
-      showToast('请先填写投递 URL', 'error');
-      return;
-    }
     testing = true;
     try {
-      const data = await adminFetchJson<{ ok?: boolean; message?: string }>('/api/deliver/test', {
+      const data = await adminFetchJson<{ ok?: boolean; message?: string; reply?: string }>('/api/llm/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: target }),
+        body: JSON.stringify({}),
       });
       if (data?.ok) {
-        showToast('投递测试成功', 'success');
+        const r = typeof data.reply === 'string' ? data.reply.trim() : '';
+        showToast(r ? `连接成功：${r.slice(0, 120)}${r.length > 120 ? '…' : ''}` : '连接成功', 'success');
       } else {
-        showToast('投递测试失败: ' + (data?.message ?? '未知错误'), 'error');
+        showToast('测试失败: ' + (data?.message ?? '未知错误'), 'error');
       }
     } catch (e) {
       showToast('测试失败: ' + (e instanceof Error ? e.message : String(e)), 'error');
@@ -69,7 +100,7 @@
 </script>
 
 <svelte:head>
-  <title>投递 - {PRODUCT_NAME}</title>
+  <title>LLM - {PRODUCT_NAME}</title>
 </svelte:head>
 
 <div class="feed-wrap">
@@ -77,22 +108,61 @@
     <div class="body">
       <BackToParentRoute />
       <p class="intro">
-        非空时，在<strong>正常入库与 Pipeline 完成之后</strong>，会<strong>额外</strong>将本批条目以 JSON POST 到该 URL（请求体含
-        <code>sourceRef</code>、<code>items</code>）。留空则不投递。投递地址<strong>不改变</strong>本地是否写库；运行日志仍落库。
+        与 OpenAI 兼容的 Chat Completions API，用于列表解析、正文提取、Pipeline 打标签与翻译等。
       </p>
 
       <section class="form-section">
-        <h3 class="section-title">投递目标 URL</h3>
+        <h3 class="section-title">API Base URL</h3>
         {#if loading}
           <p class="hint">加载中…</p>
         {:else}
           <input
             type="url"
-            class="url-input"
-            placeholder="https://downstream.example.com/ingest"
-            bind:value={url}
+            class="text-input"
+            placeholder="https://api.openai.com/v1"
+            bind:value={baseUrl}
+            autocomplete="off"
           />
-          <p class="hint">保存后生效；测试会发送一条示例条目，不写本地库。</p>
+        {/if}
+      </section>
+
+      <section class="form-section">
+        <h3 class="section-title">模型</h3>
+        {#if !loading}
+          <input
+            type="text"
+            class="text-input"
+            placeholder="gpt-4o-mini"
+            bind:value={model}
+            autocomplete="off"
+            spellcheck={false}
+          />
+        {/if}
+      </section>
+
+      <section class="form-section">
+        <h3 class="section-title">API Key</h3>
+        {#if loading}
+          <p class="hint">加载中…</p>
+        {:else}
+          <input
+            type="password"
+            class="text-input"
+            placeholder={apiKeyInFile ? '已保存在配置中，留空表示不修改' : 'sk-...'}
+            bind:value={apiKeyInput}
+            autocomplete="new-password"
+            spellcheck={false}
+          />
+          <p class="hint">
+            {#if hasApiKey}
+              当前<strong>可用</strong>（文件或环境变量）。
+            {:else}
+              未检测到 Key，请填写或设置 <code>OPENAI_API_KEY</code>。
+            {/if}
+            {#if apiKeyInFile}
+              已写入配置文件。
+            {/if}
+          </p>
         {/if}
       </section>
 
@@ -101,8 +171,8 @@
           <button type="button" class="btn btn-primary" on:click={save} disabled={saving || loading}>
             {saving ? '保存中…' : '保存'}
           </button>
-          <button type="button" class="btn btn-secondary" on:click={test} disabled={testing || loading || !url.trim()}>
-            {testing ? '测试中…' : '测试投递'}
+          <button type="button" class="btn btn-secondary" on:click={test} disabled={testing || loading || !hasApiKey}>
+            {testing ? '测试中…' : '测试连接'}
           </button>
         </div>
       </section>
@@ -150,8 +220,9 @@
   .form-section {
     margin-bottom: 1.25rem;
   }
-  .url-input {
+  .text-input {
     width: 100%;
+    box-sizing: border-box;
     padding: 0.5rem 0.75rem;
     font-size: 0.875rem;
     border: 1px solid var(--color-input);
@@ -159,13 +230,14 @@
     background: var(--color-card-elevated);
     color: var(--color-foreground);
   }
-  .url-input::placeholder {
+  .text-input::placeholder {
     color: var(--color-muted-foreground-soft);
   }
   .hint {
     font-size: 0.75rem;
     color: var(--color-muted-foreground-soft);
     margin: 0.5rem 0 0;
+    line-height: 1.45;
   }
   .btn-row {
     display: flex;

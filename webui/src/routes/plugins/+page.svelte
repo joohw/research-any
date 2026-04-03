@@ -1,5 +1,6 @@
 <script lang="ts">
   import { PRODUCT_NAME } from '$lib/brand';
+  import BackToParentRoute from '$lib/BackToParentRoute.svelte';
   import { adminFetch } from '$lib/adminAuth';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
@@ -64,7 +65,7 @@
         showAddDialog = false;
         newPluginId = '';
         await loadPlugins();
-        await goto('/admin/plugins/' + encodeURIComponent(id));
+        await goto('/plugins/' + encodeURIComponent(id));
       }
     } catch (err) {
       showToast('请求失败: ' + (err instanceof Error ? err.message : String(err)), 'error');
@@ -126,7 +127,7 @@
     if (url.searchParams.get('openAdd') === '1') {
       newPluginId = '';
       showAddDialog = true;
-      goto('/admin/plugins', { replaceState: true });
+      goto('/plugins', { replaceState: true });
     }
   });
 </script>
@@ -140,6 +141,7 @@
     <div class="plugins-toolbar-block">
       <div class="admin-feed-header">
         <div class="admin-feed-header__left">
+          <BackToParentRoute />
           <h2>插件</h2>
           <p class="admin-feed-header__desc">编写插件以适配特定页面的解析规则，比 LLM 兜底更快、更稳定。</p>
         </div>
@@ -166,7 +168,7 @@
             <div class="row">
               <div class="row-main">
                 <div class="row-title">
-                  <a class="row-id" href="/admin/plugins/{encodeURIComponent(plugin.id)}">{plugin.id}</a>
+                  <a class="row-id" href="/plugins/{encodeURIComponent(plugin.id)}">{plugin.id}</a>
                   {#if plugin.kind === 'source'}
                     <span class="kind-badge">Source</span>
                   {/if}

@@ -65,6 +65,5 @@
   }
   .cm-root :global(.cm-editor.cm-focused) {
     outline: none;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 45%, transparent);
   }
 </style>

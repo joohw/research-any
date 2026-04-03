@@ -1,5 +1,6 @@
 <script lang="ts">
   import { PRODUCT_NAME } from '$lib/brand';
+  import BackToParentRoute from '$lib/BackToParentRoute.svelte';
   import { onMount } from 'svelte';
   import { adminFetchJson } from '$lib/adminAuth';
   import { showToast } from '$lib/toastStore.js';
@@ -145,6 +146,7 @@
     <div class="feed-toolbar-block">
       <div class="admin-feed-header">
         <div class="admin-feed-header__left">
+          <BackToParentRoute />
           <h2>系统标签</h2>
           <p class="admin-feed-header__desc">
             系统标签库，新入库条目会由 LLM 自动匹配打标签。

@@ -14,6 +14,7 @@
   import Trash from 'lucide-svelte/icons/trash';
   import Copy from 'lucide-svelte/icons/copy';
   import Mail from 'lucide-svelte/icons/mail';
+  import Globe from 'lucide-svelte/icons/globe';
   import { Dialog, Popover } from 'bits-ui';
   import { refToTaskId, setPulling, clearPulling } from '$lib/sourcePullStore.js';
   import { adminFetch } from '$lib/adminAuth';
@@ -40,6 +41,8 @@
     latestAt: string | null;
     pluginId: string | null;
     weight: number;
+    /** 配置了代理时非空，用于列表地球图标与 tooltip */
+    proxy?: string;
     parseHint: ParseHint | null;
   }
 
@@ -286,6 +289,7 @@
           const ref = s.ref.trim();
           const stat = statsMap.get(ref);
           const pid = pluginMap[ref] ?? null;
+          const proxy = s.proxy?.trim();
           return {
             ref,
             displayLabel: (s.label && s.label.trim()) || ref,
@@ -294,6 +298,7 @@
             latestAt: stat?.latestAt ?? null,
             pluginId: pid,
             weight: s.weight ?? 0,
+            ...(proxy ? { proxy } : {}),
             parseHint: computeParseHint(ref, pid),
           };
         });
@@ -801,8 +806,10 @@
               <div class="cell-title">
                 <div class="title-block" title={card.ref}>
                   <span class="title-text">{card.displayLabel}</span>
-                  {#if card.weight !== 0}
-                    <span class="card-weight" title="权重">★{card.weight}</span>
+                  {#if card.proxy}
+                    <span class="card-proxy" title="代理：{card.proxy}">
+                      <Globe size={14} class="card-proxy-globe" aria-hidden="true" />
+                    </span>
                   {/if}
                 </div>
               </div>
@@ -915,6 +922,8 @@
    * 外层 `main.main-fill` 不滚动，仅 `.feed-body-scroll` 内滚动，工具条/表头始终固定（无 sticky 跟手）。
    */
   .feed-wrap {
+    /* 表头与下方列表紧贴，不保留全局 --feed-sticky-gap-after */
+    --feed-sticky-gap-after: 0;
     margin-top: calc(-1 * var(--main-padding-top));
     width: 100%;
     max-width: 100%;
@@ -1215,11 +1224,15 @@
     white-space: nowrap;
     min-width: 0;
   }
-  .card-weight {
-    font-size: 0.65rem;
-    color: #fbbf24;
-    font-weight: 500;
+  .card-proxy {
+    display: inline-flex;
+    align-items: center;
     flex-shrink: 0;
+    line-height: 0;
+  }
+  :global(.card-proxy-globe) {
+    color: var(--color-muted-foreground-soft);
+    opacity: 0.9;
   }
   .cell-desc {
     font-size: 0.78rem;
