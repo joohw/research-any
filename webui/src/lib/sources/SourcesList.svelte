@@ -1,6 +1,7 @@
 <script lang="ts">
   /// <reference path="../../lucide-svelte.d.ts" />
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { Puzzle } from 'lucide-svelte';
   import Rss from 'lucide-svelte/icons/rss';
   import Sparkles from 'lucide-svelte/icons/sparkles';
@@ -9,17 +10,21 @@
   import Pencil from 'lucide-svelte/icons/pencil';
   import Trash2 from 'lucide-svelte/icons/trash-2';
   import Plus from 'lucide-svelte/icons/plus';
+  import ArrowDownUp from 'lucide-svelte/icons/arrow-down-up';
   import MoreHorizontal from 'lucide-svelte/icons/more-horizontal';
   import Trash from 'lucide-svelte/icons/trash';
   import Copy from 'lucide-svelte/icons/copy';
   import Mail from 'lucide-svelte/icons/mail';
   import Globe from 'lucide-svelte/icons/globe';
+  import { page } from '$app/stores';
   import { Dialog, Popover } from 'bits-ui';
   import { showToast } from '$lib/toastStore.js';
   import { refToTaskId, setPulling, clearPulling } from '$lib/sourcePullStore.js';
   import { adminFetch } from '$lib/adminAuth';
   import SourceFeedsSheet from './SourceFeedsSheet.svelte';
+  import { homeFeedPanelSource } from '$lib/homeFeedPanelStore';
   import { canonicalHttpSourceRef } from '$lib/httpSourceRef.js';
+  import { faviconUrlForHostname, hostnameFromHttpSourceRef } from '$lib/sourceSiteIcon.js';
 
   type ParseHint = 'rss' | 'plugin' | 'llm' | 'email';
 
@@ -97,6 +102,8 @@
   let editingOriginalRef = '';
   /** 当前打开「更多」菜单的 card.ref，用于每行一个 Popover */
   let openMoreRef: string | null = null;
+  /** 某 ref 的 favicon 加载失败则不再重试显示 */
+  let faviconFailed: Record<string, boolean> = {};
   let clearingRef: string | null = null;
   let removingRef: string | null = null;
   /** 确认从订阅列表移除「信源」：自定义 Dialog，避免浏览器 confirm */
@@ -272,9 +279,22 @@
     }
   }
 
-  function formatWeight01(w: number): string {
-    return clampWeight01(w).toFixed(2);
+  let sortPopoverOpen = false;
+
+  function sortColumnLabel(mode: SortMode): string {
+    if (mode === 'alpha') return '标题';
+    if (mode === 'weight') return '权重';
+    if (mode === 'latest') return '最近拉取';
+    if (mode === 'parse') return '解析';
+    return '数量';
   }
+
+  function pickSortFromMenu(mode: SortMode) {
+    onHeaderSort(mode);
+    sortPopoverOpen = false;
+  }
+
+  const SORT_MENU_MODES: SortMode[] = ['alpha', 'weight', 'latest', 'parse', 'count'];
 
   $: filteredCards = sortCards(
     filterQuery.trim()
@@ -291,10 +311,6 @@
     sortBy,
     sortDir
   );
-
-  /** 与下方列表同时出现：表头与工具条同一吸顶块，避免表头单独随滚动 */
-  $: showListHead =
-    !loading && !loadError && cards.length > 0 && filteredCards.length > 0;
 
   // ── 数据加载 ──────────────────────────────────────────
   async function load() {
@@ -600,7 +616,9 @@
         showToast('移除失败，请重试', 'error');
         return;
       }
-      if (sheetCard?.ref === ref) {
+      if (get(page).url.pathname === '/') {
+        homeFeedPanelSource.update((s) => (s?.ref === ref ? null : s));
+      } else if (sheetCard?.ref === ref) {
         sheetOpen = false;
         sheetCard = null;
       }
@@ -631,6 +649,14 @@
   }
 
   function openSheetForCard(card: SourceCard) {
+    if (get(page).url.pathname === '/') {
+      homeFeedPanelSource.set({
+        ref: card.ref,
+        displayLabel: card.displayLabel,
+        ...(card.description?.trim() ? { description: card.description.trim() } : {}),
+      });
+      return;
+    }
     sheetCard = card;
     sheetOpen = true;
   }
@@ -646,21 +672,6 @@
     if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
     openSheetForCard(card);
-  }
-
-  /** 列表「最近拉取」列：YYYY-MM-DD 或 — */
-  function formatLatestShort(iso: string | null): string {
-    if (!iso) return '—';
-    try {
-      const d = new Date(iso);
-      if (Number.isNaN(d.getTime())) return '—';
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
-    } catch {
-      return '—';
-    }
   }
 
   onMount(load);
@@ -850,15 +861,19 @@
   </Dialog.Portal>
 </Dialog.Root>
 
-<SourceFeedsSheet
-  open={sheetOpen}
-  sourceRef={sheetCard?.ref ?? ''}
-  sourceLabel={sheetCard?.displayLabel ?? ''}
-  onOpenChange={(v) => {
-    sheetOpen = v;
-    if (!v) sheetCard = null;
-  }}
-/>
+{#if $page.url.pathname !== '/'}
+  <SourceFeedsSheet
+    variant="overlay"
+    open={sheetOpen}
+    sourceRef={sheetCard?.ref ?? ''}
+    sourceLabel={sheetCard?.displayLabel ?? ''}
+    sourceDescription={sheetCard?.description?.trim() ?? ''}
+    onOpenChange={(v) => {
+      sheetOpen = v;
+      if (!v) sheetCard = null;
+    }}
+  />
+{/if}
 
 <!-- ── 主界面 ─────────────────────────────────────────── -->
 <div class="feed-wrap">
@@ -872,6 +887,35 @@
           placeholder="过滤…"
           bind:value={filterQuery}
         />
+        {#if $page.url.pathname === '/' && cards.length > 0}
+          <Popover.Root open={sortPopoverOpen} onOpenChange={(o) => { sortPopoverOpen = o; }}>
+            <Popover.Trigger
+              type="button"
+              class="btn-sort"
+              title="排序：{sortColumnLabel(sortBy)}{sortDir === 'asc' ? ' 升序' : ' 降序'}，点此选择依据或同项切换方向"
+              aria-label="排序"
+            >
+              <ArrowDownUp size={16} />
+            </Popover.Trigger>
+            <Popover.Portal>
+              <Popover.Content class="dropdown-panel sort-menu" sideOffset={6} align="start">
+                {#each SORT_MENU_MODES as mode}
+                  <button
+                    type="button"
+                    class="sort-menu-item"
+                    class:active={sortBy === mode}
+                    onclick={() => pickSortFromMenu(mode)}
+                  >
+                    <span>{sortColumnLabel(mode)}</span>
+                    {#if sortBy === mode}
+                      <span class="sort-menu-dir" aria-hidden="true">{sortDir === 'asc' ? '↑' : '↓'}</span>
+                    {/if}
+                  </button>
+                {/each}
+              </Popover.Content>
+            </Popover.Portal>
+          </Popover.Root>
+        {/if}
       </div>
       <div class="header-right">
         <button type="button" class="btn-add" title="添加信源" aria-label="添加信源" onclick={openAdd}>
@@ -893,64 +937,9 @@
     {:else if filteredCards.length === 0}
       <div class="state">无匹配结果</div>
     {:else}
-      {#if showListHead}
-        <div class="list-head row-grid" role="row" aria-label="列标题">
-          <button
-            type="button"
-            class="col-h-btn col-title"
-            class:active={sortBy === 'alpha'}
-            onclick={() => onHeaderSort('alpha')}
-            title="按标题首字母排序，再次点击切换升序/降序"
-          >
-            标题
-            {#if sortBy === 'alpha'}<span class="sort-ind" aria-hidden="true">{sortDir === 'asc' ? '↑' : '↓'}</span>{/if}
-          </button>
-          <button
-            type="button"
-            class="col-h-btn col-weight"
-            class:active={sortBy === 'weight'}
-            onclick={() => onHeaderSort('weight')}
-            title="按权重（重要性）排序，再次点击切换升序/降序"
-          >
-            权重
-            {#if sortBy === 'weight'}<span class="sort-ind" aria-hidden="true">{sortDir === 'asc' ? '↑' : '↓'}</span>{/if}
-          </button>
-          <span class="col-h col-desc">描述</span>
-          <button
-            type="button"
-            class="col-h-btn col-parse"
-            class:active={sortBy === 'parse'}
-            onclick={() => onHeaderSort('parse')}
-            title="按解析方式排序，再次点击切换升序/降序"
-          >
-            解析
-            {#if sortBy === 'parse'}<span class="sort-ind" aria-hidden="true">{sortDir === 'asc' ? '↑' : '↓'}</span>{/if}
-          </button>
-          <button
-            type="button"
-            class="col-h-btn col-latest"
-            class:active={sortBy === 'latest'}
-            onclick={() => onHeaderSort('latest')}
-            title="按最近拉取时间排序，再次点击切换升序/降序"
-          >
-            最近拉取
-            {#if sortBy === 'latest'}<span class="sort-ind" aria-hidden="true">{sortDir === 'asc' ? '↑' : '↓'}</span>{/if}
-          </button>
-          <button
-            type="button"
-            class="col-h-btn col-count"
-            class:active={sortBy === 'count'}
-            onclick={() => onHeaderSort('count')}
-            title="按条目数量排序，再次点击切换升序/降序"
-          >
-            数量
-            {#if sortBy === 'count'}<span class="sort-ind" aria-hidden="true">{sortDir === 'asc' ? '↑' : '↓'}</span>{/if}
-          </button>
-          <span class="col-h col-actions" aria-hidden="true"></span>
-        </div>
-      {/if}
       <div class="list">
           {#each filteredCards as card (card.ref)}
+            {@const siteHost = hostnameFromHttpSourceRef(card.ref)}
             <div
               class="card row-grid"
               role="button"
@@ -960,7 +949,26 @@
             >
               <div class="cell-title">
                 <div class="title-block" title={card.ref}>
+                  {#if siteHost}
+                    <span class="source-title-favicon-slot" aria-hidden="true">
+                      {#if !faviconFailed[card.ref]}
+                        <img
+                          class="source-title-favicon"
+                          src={faviconUrlForHostname(siteHost)}
+                          alt=""
+                          width="16"
+                          height="16"
+                          loading="lazy"
+                          decoding="async"
+                          onerror={() => {
+                            faviconFailed = { ...faviconFailed, [card.ref]: true };
+                          }}
+                        />
+                      {/if}
+                    </span>
+                  {/if}
                   <span class="title-text">{card.displayLabel}</span>
+                  <span class="title-item-count" title="已收录条目">{card.count}</span>
                   {#if card.proxy}
                     <span class="card-proxy" title="代理：{card.proxy}">
                       <Globe size={14} class="card-proxy-globe" aria-hidden="true" />
@@ -968,13 +976,6 @@
                   {/if}
                 </div>
               </div>
-              <div class="cell-weight tabular" title="权重（0–1）">{formatWeight01(card.weight)}</div>
-              <div class="cell-desc" title={card.description ?? ''}>{card.description?.trim() ? card.description : '—'}</div>
-              <div class="cell-parse">
-                <span class="parse-mode" title={parseModeTitle(card.parseHint)}>{parseModeLabel(card.parseHint)}</span>
-              </div>
-              <div class="cell-latest tabular">{formatLatestShort(card.latestAt)}</div>
-              <div class="cell-count tabular">{card.count}</div>
               <div class="cell-actions">
                 <Popover.Root
                   open={openMoreRef === card.ref}
@@ -1066,14 +1067,16 @@
 <style>
   /**
    * 与 `main` 的 padding-top 对消，把那段间距放进 `.feed-toolbar-block`。
-   * 仅 `.feed-body-scroll` 内滚动；表头在滚动区内 `position: sticky`，与日志/插件列表一致。
+   * 横向：抵消 `.shell` 的 padding-inline，使信源行分割线贴齐壳体竖线；仅工具条保留 gutter。
    */
   .feed-wrap {
-    /* 表头与下方列表紧贴，不保留全局 --feed-sticky-gap-after */
     --feed-sticky-gap-after: 0;
     margin-top: calc(-1 * var(--main-padding-top));
-    width: 100%;
-    max-width: 100%;
+    margin-left: calc(-1 * var(--shell-gutter));
+    margin-right: calc(-1 * var(--shell-gutter));
+    width: calc(100% + 2 * var(--shell-gutter));
+    max-width: none;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     flex: 1;
@@ -1094,6 +1097,8 @@
     flex-shrink: 0;
     padding-top: var(--main-padding-top);
     padding-bottom: var(--feed-sticky-gap-after);
+    padding-inline: var(--shell-gutter);
+    box-sizing: border-box;
   }
 
   .feed-body-scroll {
@@ -1109,17 +1114,15 @@
   .feed-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
+    gap: 0.75rem;
     padding: 0.75rem 0;
     flex-shrink: 0;
-    border-bottom: 1px solid var(--color-border-muted);
   }
   .header-left {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
   }
   .header-right {
@@ -1127,12 +1130,13 @@
     align-items: center;
     gap: 0.5rem;
     flex-shrink: 0;
+    margin-left: auto;
   }
   .filter-input {
-    flex: 1;
-    min-width: 7rem;
-    max-width: 18rem;
-    width: auto;
+    flex: 0 1 auto;
+    width: 100%;
+    min-width: 6.5rem;
+    max-width: 12rem;
     padding: 0.35rem 0.6rem;
     font-size: 0.8125rem;
     border: 1px solid var(--color-input);
@@ -1148,6 +1152,72 @@
   }
   .filter-input::placeholder {
     color: var(--color-muted-foreground-soft);
+  }
+
+  /* bits-ui Popover.Trigger：用 :global 才能作用到传送后的 button */
+  :global(.btn-sort) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    flex-shrink: 0;
+    font: inherit;
+    color: var(--color-muted-foreground-strong);
+    background: transparent;
+    border: 1px solid var(--color-input);
+    border-radius: var(--radius-sm);
+    box-shadow: none;
+    cursor: pointer;
+    transition:
+      color 0.15s,
+      border-color 0.15s,
+      background 0.15s;
+  }
+  :global(.btn-sort:hover) {
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+    background: transparent;
+  }
+  :global(.btn-sort:focus-visible) {
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
+    outline-offset: 1px;
+  }
+
+  :global(.sort-menu) {
+    min-width: 10.5rem;
+    padding: 0.3rem;
+    box-sizing: border-box;
+  }
+  .sort-menu-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.4rem 0.55rem;
+    font-size: 0.8125rem;
+    text-align: left;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    background: transparent;
+    color: var(--color-muted-foreground-strong);
+    transition: background 0.12s, color 0.12s;
+  }
+  .sort-menu-item:hover {
+    background: var(--color-muted);
+    color: var(--color-accent-foreground);
+  }
+  .sort-menu-item.active {
+    color: var(--color-primary);
+    font-weight: 500;
+  }
+  .sort-menu-dir {
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.9;
   }
 
   .btn-add {
@@ -1234,7 +1304,7 @@
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 1.5rem 1.25rem;
+    padding: 1.5rem calc(var(--shell-gutter) + 1rem);
     color: var(--color-muted-foreground);
     font-size: 0.875rem;
     gap: 0.25rem;
@@ -1253,105 +1323,29 @@
   }
   .link-btn:hover { text-decoration: underline; }
 
-  /* ── list：表头（sticky）+ 行网格；与插件/日志页同属 `.feed-body-scroll` 滚动区 ── */
-  .feed-body-scroll > .list-head,
+  /* ── list：简化为标题 + 操作；与插件/日志页同属 `.feed-body-scroll` 滚动区 ── */
   .feed-body-scroll > .list {
     flex-shrink: 0;
   }
   .list {
-    min-width: min(100%, 580px);
+    min-width: 0;
     width: 100%;
     display: flex;
     flex-direction: column;
+    border-top: 1px solid var(--color-border-muted);
   }
 
   .row-grid {
     display: grid;
-    grid-template-columns:
-      minmax(0, 1.05fr)
-      minmax(3rem, 0.32fr)
-      minmax(0, 1.1fr)
-      minmax(4.5rem, 0.55fr)
-      minmax(5.5rem, 0.5fr)
-      minmax(2.75rem, 0.35fr)
-      auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 0.5rem 0.75rem;
     align-items: center;
-    padding: 0.55rem 0;
+    padding: 0.55rem var(--shell-gutter);
     box-sizing: border-box;
-  }
-
-  .list-head.row-grid {
-    /* 不与数据行共用 `.row-grid` 的较大 padding，避免表头过高 */
-    padding-top: 0.3rem;
-    padding-bottom: 0.35rem;
-    min-height: 0;
-  }
-  .list-head {
-    position: sticky;
-    top: 0;
-    z-index: 3;
-    width: 100%;
-    min-width: min(100%, 580px);
-    box-sizing: border-box;
-    background: var(--color-card-elevated);
-    border-bottom: 1px solid var(--color-border);
-    align-items: center;
-  }
-  .col-h {
-    font-size: 0.65rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--color-muted-foreground-soft);
-    white-space: nowrap;
-  }
-  .col-h-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 0.15rem;
-    margin: 0;
-    padding: 0;
-    min-height: 0;
-    line-height: 1.25;
-    font: inherit;
-    font-size: 0.65rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--color-muted-foreground-soft);
-    white-space: nowrap;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    text-align: left;
-    transition: color 0.15s;
-  }
-  .col-h-btn:hover {
-    color: var(--color-primary);
-  }
-  .col-h-btn.active {
-    color: var(--color-primary);
-  }
-  .sort-ind {
-    font-size: 0.7rem;
-    font-weight: 700;
-    line-height: 1;
-    opacity: 0.95;
-  }
-  .col-h.col-actions {
-    width: auto;
-    min-width: 2.75rem;
-  }
-  .col-h-btn.col-weight {
-    justify-content: flex-end;
-    text-align: right;
   }
 
   .card {
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border-muted);
     transition: background 0.15s;
     cursor: pointer;
   }
@@ -1372,10 +1366,34 @@
   .title-block {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: 0.35rem;
     min-width: 0;
     max-width: 100%;
     color: inherit;
+  }
+  .title-item-count {
+    flex-shrink: 0;
+    margin-left: 0.15rem;
+    font-size: 0.72rem;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-muted-foreground-soft);
+    line-height: 1.2;
+  }
+  .source-title-favicon-slot {
+    flex-shrink: 0;
+    box-sizing: border-box;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 3px;
+    background: var(--color-muted);
+    overflow: hidden;
+  }
+  .source-title-favicon {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
   }
   .title-text {
     font-size: 0.875rem;
@@ -1396,42 +1414,6 @@
     color: var(--color-muted-foreground-soft);
     opacity: 0.9;
   }
-  .cell-desc {
-    font-size: 0.78rem;
-    color: var(--color-muted-foreground);
-    line-height: 1.35;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-  }
-
-  .cell-parse {
-    min-width: 0;
-  }
-  .parse-mode {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--color-muted-foreground-strong);
-    white-space: nowrap;
-  }
-
-  .cell-weight {
-    font-size: 0.78rem;
-    color: var(--color-muted-foreground-strong);
-    min-width: 0;
-    text-align: right;
-  }
-  .cell-latest,
-  .cell-count {
-    font-size: 0.78rem;
-    color: var(--color-muted-foreground-strong);
-    min-width: 0;
-  }
-  .tabular {
-    font-variant-numeric: tabular-nums;
-  }
-
   .cell-actions {
     display: inline-flex;
     align-items: center;

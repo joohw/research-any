@@ -2,7 +2,9 @@
   import { Dialog } from 'bits-ui';
   import X from 'lucide-svelte/icons/x';
   import ExternalLink from 'lucide-svelte/icons/external-link';
+  import RefreshCw from 'lucide-svelte/icons/refresh-cw';
   import { adminFetch } from '$lib/adminAuth';
+  import { refToTaskId } from '$lib/sourcePullStore.js';
 
   interface FeedRow {
     id: string;
@@ -16,6 +18,10 @@
   export let open = false;
   export let sourceRef = '';
   export let sourceLabel = '';
+  /** 标题下方展示（无则显示 —） */
+  export let sourceDescription = '';
+  /** `overlay`：右侧抽屉 + 遮罩；`inline`：与信源列表并排占满主区域右侧列 */
+  export let variant: 'overlay' | 'inline' = 'overlay';
   /** @param v */
   export let onOpenChange: (v: boolean) => void = () => {};
 
@@ -82,26 +88,91 @@
   function itemTime(row: FeedRow): string {
     return formatWhen(row.pub_date || row.fetched_at);
   }
+
+  $: sublineText = sourceDescription.trim() ? sourceDescription.trim() : '—';
+  $: headerTitleAttr = [sourceLabel, sourceRef].filter(Boolean).join(' · ') || undefined;
+
+  $: inlinePulling =
+    variant === 'inline' && open && sourceRef.trim() !== '' && sourceRef in $refToTaskId;
+
+  let prevInlinePulling = false;
+  $: {
+    if (prevInlinePulling && !inlinePulling && open && variant === 'inline' && sourceRef.trim()) {
+      loadItems();
+    }
+    prevInlinePulling = inlinePulling;
+  }
 </script>
 
-<Dialog.Root
-  {open}
-  onOpenChange={(v) => onOpenChange(v)}
->
-  <Dialog.Portal>
-    <Dialog.Overlay class="source-sheet-overlay" />
-    <Dialog.Content class="source-sheet-panel" aria-describedby={undefined}>
-      <header class="source-sheet-header">
-        <div class="source-sheet-title-wrap">
-          <Dialog.Title
-            class="source-sheet-title"
-            title={sourceLabel || sourceRef || undefined}
-          >{sourceLabel || sourceRef || '信源条目'}</Dialog.Title>
-          <p class="source-sheet-sub" title={sourceRef}>{sourceRef}</p>
+{#if variant === 'overlay'}
+  <Dialog.Root
+    {open}
+    onOpenChange={(v) => onOpenChange(v)}
+  >
+    <Dialog.Portal>
+      <Dialog.Overlay class="source-sheet-overlay" />
+      <Dialog.Content class="source-sheet-panel" aria-describedby={undefined}>
+        <header class="source-sheet-header">
+          <div class="source-sheet-title-wrap">
+            <Dialog.Title
+              class="source-sheet-title"
+              title={headerTitleAttr}
+            >{sourceLabel || sourceRef || '信源条目'}</Dialog.Title>
+            <p class="source-sheet-sub source-sheet-sub-desc" title={sourceRef}>{sublineText}</p>
+          </div>
+          <Dialog.Close class="source-sheet-close" aria-label="关闭">
+            <X size={18} />
+          </Dialog.Close>
+        </header>
+        <div class="source-sheet-body">
+          {#if loading && items.length === 0}
+            <div class="source-sheet-state">加载中…</div>
+          {:else if loadError}
+            <div class="source-sheet-state err">{loadError}</div>
+          {:else if items.length === 0}
+            <div class="source-sheet-state">暂无条目</div>
+          {:else}
+            <ul class="source-feed-list">
+              {#each items as row (row.id)}
+                <li class="source-feed-row">
+                  <a
+                    class="source-feed-link"
+                    href={row.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={row.summary?.trim() || row.title || row.url}
+                  >
+                    <span class="source-feed-title">{row.title?.trim() ? row.title : row.url}</span>
+                    <span class="source-feed-meta">
+                      <time datetime={row.pub_date || row.fetched_at}>{itemTime(row)}</time>
+                      <span class="source-feed-ext" aria-hidden="true">
+                        <ExternalLink size={12} />
+                      </span>
+                    </span>
+                  </a>
+                </li>
+              {/each}
+            </ul>
+          {/if}
         </div>
-        <Dialog.Close class="source-sheet-close" aria-label="关闭">
-          <X size={18} />
-        </Dialog.Close>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>
+{:else}
+  <aside class="source-feed-panel-inline" aria-label="信源条目列表">
+    {#if open && sourceRef.trim()}
+      <header class="source-sheet-header source-sheet-header-inline">
+        <div class="source-sheet-title-wrap">
+          <h2 class="source-sheet-title" title={headerTitleAttr}>
+            {sourceLabel || sourceRef || '信源条目'}
+          </h2>
+          <p class="source-sheet-sub source-sheet-sub-desc" title={sourceRef}>{sublineText}</p>
+        </div>
+        {#if inlinePulling}
+          <div class="source-sheet-pull-status" title="拉取中…" aria-live="polite">
+            <RefreshCw size={18} />
+          </div>
+        {/if}
       </header>
       <div class="source-sheet-body">
         {#if loading && items.length === 0}
@@ -134,9 +205,14 @@
           </ul>
         {/if}
       </div>
-    </Dialog.Content>
-  </Dialog.Portal>
-</Dialog.Root>
+    {:else}
+      <div class="source-sheet-inline-empty">
+        <p class="source-sheet-inline-empty-title">信源条目</p>
+        <p class="source-sheet-inline-empty-hint">在左侧列表中点击某一信源，在此查看已拉取的条目。</p>
+      </div>
+    {/if}
+  </aside>
+{/if}
 
 <style>
   /**
@@ -226,6 +302,91 @@
       animation-iteration-count: 1;
     }
   }
+
+  /* ── 内嵌右栏：外框由 layout-merged-cluster 统一；此处不再画左右边线 ───────────────── */
+  .source-feed-panel-inline {
+    box-sizing: border-box;
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    max-width: none;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: transparent;
+    border-left: none;
+    border-right: none;
+  }
+  .source-sheet-inline-empty {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem 1.25rem;
+    text-align: center;
+  }
+  .source-sheet-inline-empty-title {
+    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-muted-foreground-strong);
+  }
+  .source-sheet-inline-empty-hint {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: var(--color-muted-foreground-soft);
+    max-width: 16rem;
+  }
+  .source-feed-panel-inline .source-sheet-header-inline {
+    padding: 0 0.85rem 0.75rem 1rem;
+    align-items: flex-start;
+  }
+  .source-feed-panel-inline h2.source-sheet-title {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--color-foreground);
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .source-sheet-pull-status {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    margin: -0.1rem 0 0;
+    color: var(--color-primary);
+  }
+  .source-sheet-pull-status :global(svg) {
+    animation: source-sheet-spin 0.8s linear infinite;
+  }
+  @keyframes source-sheet-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @media (max-width: 720px) {
+    .source-feed-panel-inline {
+      flex: 1 1 auto;
+      max-width: none;
+      min-width: 0;
+      min-height: 12rem;
+      max-height: min(42vh, 22rem);
+      border-left: none;
+      border-right: none;
+      border-top: none;
+    }
+  }
+
   .source-sheet-header {
     flex-shrink: 0;
     display: flex;
@@ -256,6 +417,16 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .source-sheet-sub.source-sheet-sub-desc {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+    word-break: break-word;
+    text-overflow: unset;
   }
   :global(.source-sheet-close) {
     flex-shrink: 0;

@@ -1,21 +1,11 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { PRODUCT_NAME } from '$lib/brand';
   import { adminFetch } from '$lib/adminAuth';
   import { showToast } from '$lib/toastStore.js';
-  import { Select } from 'bits-ui';
-  import ChevronDown from 'lucide-svelte/icons/chevron-down';
+
   const LEVELS = ['error', 'warn', 'info', 'debug'] as const;
-  const CATEGORY_DEBOUNCE_MS = 350;
-
-  const levelItems: { value: string; label: string }[] = [
-    { value: '', label: '全部' },
-    ...LEVELS.map((l) => ({ value: l, label: l })),
-  ];
-
-  function levelLabel(v: string): string {
-    return levelItems.find((x) => x.value === v)?.label ?? '全部';
-  }
+  const FILTER_DEBOUNCE_MS = 350;
 
   interface LogItem {
     id: number;
@@ -30,41 +20,51 @@
   let total = 0;
   let loading = false;
   let error = '';
-  let filterLevel = '';
+  /** 空为全部；否则为 error / warn / info / debug */
+  let filterLevelInput = '';
   /** 类型筛选（自由字符串，子串匹配；与请求同步） */
   let filterCategoryInput = '';
-  let categoryDebounce: ReturnType<typeof setTimeout> | null = null;
+  let filterDebounce: ReturnType<typeof setTimeout> | null = null;
   let offset = 0;
   let expandedId: number | null = null;
   let clearing = false;
 
   const PAGE_SIZE = 100;
 
-  function onCategoryInput() {
-    if (categoryDebounce) clearTimeout(categoryDebounce);
-    categoryDebounce = setTimeout(() => {
-      categoryDebounce = null;
-      offset = 0;
-      load();
-    }, CATEGORY_DEBOUNCE_MS);
+  function clearFilterDebounce() {
+    if (filterDebounce) {
+      clearTimeout(filterDebounce);
+      filterDebounce = null;
+    }
   }
 
-  onDestroy(() => {
-    if (categoryDebounce) clearTimeout(categoryDebounce);
-  });
+  function onFilterInput() {
+    clearFilterDebounce();
+    filterDebounce = setTimeout(() => {
+      filterDebounce = null;
+      offset = 0;
+      load();
+    }, FILTER_DEBOUNCE_MS);
+  }
 
-  // 级别变更时重新加载（类型由输入框防抖后自行 load）
-  $: {
-    void filterLevel;
+  function onLevelChange() {
     offset = 0;
     load();
   }
+
+  onMount(() => {
+    load();
+  });
+
+  onDestroy(() => {
+    clearFilterDebounce();
+  });
 
   function buildUrl(): string {
     const params = new URLSearchParams();
     params.set('limit', String(PAGE_SIZE));
     params.set('offset', String(offset));
-    if (filterLevel) params.set('level', filterLevel);
+    if (filterLevelInput) params.set('level', filterLevelInput);
     const cat = filterCategoryInput.trim();
     if (cat) params.set('category', cat);
     return '/api/logs?' + params.toString();
@@ -88,18 +88,10 @@
     }
   }
 
-  function refresh() {
-    if (categoryDebounce) {
-      clearTimeout(categoryDebounce);
-      categoryDebounce = null;
-    }
-    offset = 0;
-    load();
-  }
-
   async function clearLogs() {
     if (!confirm('确定清空全部日志？此操作不可恢复。')) return;
     clearing = true;
+    clearFilterDebounce();
     try {
       const res = await adminFetch('/api/logs', { method: 'DELETE' });
       const txt = await res.text();
@@ -176,24 +168,34 @@
   <title>日志 - {PRODUCT_NAME}</title>
 </svelte:head>
 
-<div class="page">
-  <div class="logs-col">
-    <div class="logs-toolbar-block">
-      <div class="admin-feed-header">
-        <div class="admin-feed-header__left">
-          <h2>日志</h2>
-          <p class="admin-feed-header__desc">
-            运行与抓取、pipeline 等产生的日志写入本地 logs.db；可按级别与类型筛选，支持刷新与清空。
-          </p>
+<div class="feed-wrap">
+  <div class="feed-col">
+    <div class="feed-toolbar-block">
+      <div class="feed-header">
+        <div class="header-left">
+          <input
+            type="search"
+            class="filter-input"
+            placeholder="过滤…"
+            bind:value={filterCategoryInput}
+            on:input={onFilterInput}
+            autocomplete="off"
+            spellcheck="false"
+            aria-label="分类"
+          />
         </div>
-        <div class="admin-feed-header__actions">
-          <button
-            class="admin-toolbar-btn admin-toolbar-btn--secondary"
-            type="button"
-            on:click={refresh}
-            disabled={loading || clearing}
-            title="刷新"
-          >刷新</button>
+        <div class="header-right">
+          <select
+            class="filter-input filter-input--level"
+            bind:value={filterLevelInput}
+            on:change={onLevelChange}
+            aria-label="级别"
+          >
+            <option value="">全部</option>
+            {#each LEVELS as lv (lv)}
+              <option value={lv}>{lv}</option>
+            {/each}
+          </select>
           <button
             class="admin-toolbar-btn admin-toolbar-btn--danger"
             type="button"
@@ -201,44 +203,6 @@
             disabled={loading || clearing}
             title="清空全部日志"
           >清空</button>
-        </div>
-      </div>
-      <div class="filters">
-        <div class="filter-row">
-          <div class="filter-left">
-            <div class="filter-level-field">
-              <span class="filter-level-label">级别</span>
-              <Select.Root type="single" bind:value={filterLevel} items={levelItems}>
-                <Select.Trigger class="level-select-trigger">
-                  <span class="level-select-value">{levelLabel(filterLevel)}</span>
-                  <ChevronDown size={14} class="level-select-chevron" aria-hidden="true" />
-                </Select.Trigger>
-                <Select.Portal>
-                  <Select.Content class="level-select-content" sideOffset={6} align="start">
-                    <Select.Viewport class="level-select-viewport">
-                      {#each levelItems as opt (opt.value)}
-                        <Select.Item value={opt.value} label={opt.label} class="level-select-item">
-                          {opt.label}
-                        </Select.Item>
-                      {/each}
-                    </Select.Viewport>
-                  </Select.Content>
-                </Select.Portal>
-              </Select.Root>
-            </div>
-            <label class="label-category">
-              <span>类型</span>
-              <input
-                type="text"
-                class="filter-category-input"
-                placeholder="留空为全部；支持子串匹配"
-                bind:value={filterCategoryInput}
-                on:input={onCategoryInput}
-                autocomplete="off"
-                spellcheck="false"
-              />
-            </label>
-          </div>
         </div>
       </div>
     </div>
@@ -304,15 +268,16 @@
 
   {/if}
   </div>
-  </div>
+</div>
 </div>
 
 <style>
   /**
-   * 与信源/标签页一致：抵消 `main` 的 padding-top，把间距写回工具条，
-   * 在 `main.main-fill` 下仅 `.log-table-scroll` 滚动，标题+筛选不随页面卷动。
+   * 与首页/插件一致：抵消 `main` 的 padding-top；顶栏左过滤（与信源同 placeholder）、右级别下拉与清空；
+   * 在 `main.main-fill` 下仅 `.log-table-scroll` 滚动，工具条不随列表卷动。
    */
-  .page {
+  .feed-wrap {
+    --feed-sticky-gap-after: 0;
     margin-top: calc(-1 * var(--main-padding-top));
     width: 100%;
     max-width: 100%;
@@ -323,7 +288,7 @@
     overflow: hidden;
   }
 
-  .logs-col {
+  .feed-col {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -332,10 +297,68 @@
     background: transparent;
   }
 
-  .logs-toolbar-block {
+  .feed-toolbar-block {
     flex-shrink: 0;
     padding-top: var(--main-padding-top);
     padding-bottom: var(--feed-sticky-gap-after);
+  }
+
+  .feed-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 0;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--color-border-muted);
+  }
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex: 1;
+    min-width: 0;
+  }
+  /** 与首页 `SourcesList` 的 `.filter-input` 一致 */
+  .header-left .filter-input {
+    flex: 1;
+    min-width: 7rem;
+    max-width: 18rem;
+    width: auto;
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+  }
+  .filter-input {
+    box-sizing: border-box;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.8125rem;
+    font-family: inherit;
+    border: 1px solid var(--color-input);
+    border-radius: var(--radius-sm);
+    outline: none;
+    background: var(--color-card-elevated);
+    color: var(--color-foreground);
+    transition:
+      border-color 0.15s,
+      background 0.15s;
+  }
+  .filter-input:focus {
+    border-color: var(--color-primary);
+    background: var(--color-card);
+  }
+  .filter-input::placeholder {
+    color: var(--color-muted-foreground-soft);
+  }
+  .filter-input--level {
+    width: auto;
+    min-width: 7rem;
+    flex-shrink: 0;
+    cursor: pointer;
+    font-variant-numeric: tabular-nums;
   }
 
   .log-body-scroll {
@@ -370,136 +393,6 @@
     border-radius: 2px;
   }
 
-  .filters {
-    padding: 0;
-    flex-shrink: 0;
-    padding-top: 0.75rem;
-  }
-  .filter-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-  }
-  .filter-left {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.75rem;
-    flex: 1;
-    min-width: 0;
-  }
-  .filter-row label {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    font-size: 0.8125rem;
-    color: var(--color-muted-foreground-strong);
-  }
-  .filter-row label span {
-    white-space: nowrap;
-  }
-  .filter-level-field {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    font-size: 0.8125rem;
-    color: var(--color-muted-foreground-strong);
-  }
-  .filter-level-label {
-    white-space: nowrap;
-  }
-  :global(.level-select-trigger) {
-    display: inline-flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.4rem;
-    min-width: 7rem;
-    height: 2rem;
-    padding: 0 0.6rem;
-    box-sizing: border-box;
-    font-size: 0.8125rem;
-    font-family: inherit;
-    color: var(--color-foreground);
-    background: var(--color-card-elevated);
-    border: 1px solid var(--color-input);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: border-color 0.15s, background 0.15s;
-  }
-  :global(.level-select-trigger:hover) {
-    border-color: var(--color-border);
-    background: var(--color-card);
-  }
-  :global(.level-select-trigger[data-state='open']) {
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 35%, transparent);
-  }
-  .level-select-value {
-    flex: 1;
-    min-width: 0;
-    text-align: left;
-    font-variant-numeric: tabular-nums;
-  }
-  :global(.level-select-chevron) {
-    flex-shrink: 0;
-    opacity: 0.65;
-  }
-  :global(.level-select-content) {
-    z-index: 120;
-    min-width: 7rem;
-    max-height: min(16rem, 70vh);
-    overflow: hidden;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--color-border);
-    background: var(--color-card-elevated);
-    box-shadow: var(--shadow-panel);
-    padding: 0.2rem;
-  }
-  :global(.level-select-viewport) {
-    padding: 0.1rem 0;
-  }
-  :global(.level-select-item) {
-    display: flex;
-    align-items: center;
-    padding: 0.4rem 0.55rem;
-    font-size: 0.8125rem;
-    border-radius: 4px;
-    cursor: pointer;
-    color: var(--color-foreground);
-    outline: none;
-  }
-  :global(.level-select-item[data-highlighted]) {
-    background: var(--color-muted);
-  }
-  :global(.level-select-item[data-selected]) {
-    background: color-mix(in srgb, var(--color-primary) 16%, transparent);
-    color: var(--color-foreground);
-  }
-  .label-category {
-    flex: 1;
-    min-width: 0;
-    max-width: 20rem;
-  }
-  .filter-category-input {
-    flex: 1;
-    min-width: 0;
-    padding: 0.35rem 0.6rem;
-    border: 1px solid var(--color-input);
-    border-radius: 5px;
-    font-size: 0.8125rem;
-    font-family: inherit;
-    background: var(--color-card-elevated);
-    color: var(--color-foreground);
-  }
-  .filter-category-input::placeholder {
-    color: var(--color-muted-foreground-soft);
-  }
-  .filter-category-input:focus {
-    outline: none;
-    border-color: var(--color-primary);
-  }
   .btn {
     display: inline-flex;
     align-items: center;
@@ -648,20 +541,20 @@
   }
 
   .payload-row td {
-    padding: 0 0.75rem 0.5rem;
-    background: var(--color-card);
+    padding: 0.25rem 0.75rem 0.65rem;
+    background: transparent;
     border-bottom: 1px solid var(--color-border-muted);
     vertical-align: top;
   }
   .payload-content {
     margin: 0;
-    padding: 0.5rem 0.75rem;
+    padding: 0;
     font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
     font-size: 0.72rem;
     line-height: 1.5;
-    background: var(--color-card-elevated);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
+    background: transparent;
+    border: none;
+    border-radius: 0;
     overflow-x: auto;
     max-height: 200px;
     overflow-y: auto;
@@ -708,7 +601,7 @@
   }
 
   @media (max-width: 720px) {
-    .page {
+    .feed-wrap {
       max-width: 100%;
     }
     .payload-row td {

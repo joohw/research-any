@@ -16,9 +16,11 @@ import { registerDeliverRoutes } from "./deliver.js";
 import { registerLlmRoutes } from "./llm.js";
 import { registerProxySettingsRoutes } from "./proxy.js";
 import { registerTasksRoutes } from "./tasks.js";
+import { registerFeedFaviconRoutes } from "./feed-favicon.js";
 
 export function registerApiRoutes(app: Hono): void {
   registerServerRoutes(app);
+  registerFeedFaviconRoutes(app);
   registerRssApiRoutes(app);
   registerSchedulerRoutes(app);
   registerPluginsRoutes(app);

@@ -47,8 +47,11 @@
   --radius-lg: 10px;
 
   /** 与顶栏对齐：主内容区最大宽度与左右留白（略收紧，配合竖向分割线更紧凑） */
-  --shell-gutter: clamp(0.65rem, 2.2vw, 1.15rem);
-  --content-max: min(840px, calc(100vw - 2 * var(--shell-gutter)));
+  --shell-gutter: clamp(0.5rem, 1.8vw, 1rem);
+  /** 与 Tailwind `max-w-5xl` 一致：整页三列合并区总宽度上限 */
+  --layout-max-width: 64rem;
+  /** 主内容区内 `.shell` 可读宽度上限（约原 720px）；实际用 min(...,100%) 避免溢出中间列 */
+  --content-max: 64rem;
 
   /** 与 `.topbar` 总高度一致：子区域 sticky 时贴在顶栏下方（随顶栏 padding 变更需同步） */
   --topbar-sticky-offset: calc(1rem + 0.5rem + 1.625rem);
