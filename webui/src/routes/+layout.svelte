@@ -104,7 +104,12 @@
               <path fill="currentColor" d={siGithub.path} />
             </svg>
           </a>
-          <span class="nav-rail-brand" title={PRODUCT_NAME}>{PRODUCT_NAME}</span>
+          <a
+            class="nav-rail-brand"
+            href="/"
+            title={PRODUCT_NAME}
+            aria-label="返回信源首页"
+          >{PRODUCT_NAME}</a>
         </div>
       </aside>
 
@@ -320,8 +325,19 @@
     max-height: 6.5rem;
     overflow: hidden;
     text-overflow: ellipsis;
-    cursor: default;
+    text-decoration: none;
+    cursor: pointer;
     user-select: none;
+    transition: color 0.15s ease;
+  }
+
+  .nav-rail-brand:hover {
+    color: var(--color-foreground);
+  }
+
+  .nav-rail-brand:focus-visible {
+    outline: 1px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
+    outline-offset: 2px;
   }
 
   .shell {
@@ -464,5 +480,7 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
+    /* 列表在 main 内滚动时，底部 padding 会变成视口下固定空白 */
+    padding-bottom: 0;
   }
 </style>

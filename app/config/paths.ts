@@ -1,6 +1,6 @@
 // 路径配置：集中管理所有运行时路径，区分项目文件与用户数据
 
-import { mkdir, rename, access, copyFile } from "node:fs/promises";
+import { mkdir, rename, access, copyFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { logger } from "../core/logger/index.js";
@@ -37,6 +37,10 @@ export const BUILTIN_PLUGINS_DIR = join(PACKAGE_ROOT, "app/plugins/builtin");
 
 /** 用户插件目录：.rssany/plugins/（扁平 *.rssany.js / *.rssany.ts） */
 export const USER_PLUGINS_DIR = join(USER_DIR, "plugins");
+
+/** 限定 .rssany 下动态 import 的模块类型，避免 Node 一直向上解析到用户主目录的 package.json 并触发 MODULE_TYPELESS_PACKAGE_JSON */
+const USER_DIR_PACKAGE_JSON = join(USER_DIR, "package.json");
+const USER_DIR_PACKAGE_JSON_MINIMAL = `${JSON.stringify({ type: "module", private: true, description: "RssAny user data root; marks plugins as ESM for Node" })}\n`;
 
 /** 管理页「添加插件」所用模板（非 Site，不参与加载） */
 export const PLUGIN_SITE_TEMPLATE_PATH = join(PACKAGE_ROOT, "app/plugins/site.rssany.js");
@@ -92,12 +96,27 @@ async function seedExampleConfigsIfMissing(): Promise<void> {
   }
 }
 
+/** 若尚无文件则写入最小 package.json，使用户插件目录下的 *.rssany.js 被明确视为 ESM */
+async function ensureUserDirPackageJsonForPlugins(): Promise<void> {
+  if (await pathExists(USER_DIR_PACKAGE_JSON)) return;
+  try {
+    await writeFile(USER_DIR_PACKAGE_JSON, USER_DIR_PACKAGE_JSON_MINIMAL, "utf-8");
+    logger.info("config", "已写入 .rssany/package.json（type: module，消除插件 ESM 歧义）", { path: USER_DIR_PACKAGE_JSON });
+  } catch (err) {
+    logger.warn("config", "写入 .rssany/package.json 失败", {
+      path: USER_DIR_PACKAGE_JSON,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 /** 初始化用户数据目录；若缺少 sources.json / config.json 则从包内示例复制 */
 export async function initUserDir(): Promise<void> {
   await mkdir(USER_DIR, { recursive: true });
   await mkdir(DATA_DIR, { recursive: true });
   await mkdir(CACHE_DIR, { recursive: true });
   await mkdir(USER_PLUGINS_DIR, { recursive: true });
+  await ensureUserDirPackageJsonForPlugins();
   await seedExampleConfigsIfMissing();
   if (!(await pathExists(SOURCES_CONFIG_PATH)) && (await pathExists(LEGACY_SUBSCRIPTIONS_PATH))) {
     await migrateFile(LEGACY_SUBSCRIPTIONS_PATH, SOURCES_CONFIG_PATH);
