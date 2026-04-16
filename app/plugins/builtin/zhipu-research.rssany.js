@@ -113,7 +113,7 @@ function buildItemsFromBlogsItems(blogsItems) {
     const summary = normalizeText(blog.resume_zh ?? blog.resume_en ?? "");
     const createdAt = String(blog.createAt ?? "").trim();
     const pubDate = createdAt ? new Date(createdAt) : new Date();
-    const category = normalizeText(blog.tag_zh ?? blog.tag_en ?? "");
+    const _category = normalizeText(blog.tag_zh ?? blog.tag_en ?? "");
     items.push({
       guid: hashGuid(link),
       title,
@@ -263,7 +263,7 @@ function buildItemsFromLeafSequence(html, titleIdMap) {
   for (let i = 0; i < leafTexts.length; i += 1) {
     const dateText = leafTexts[i];
     if (!isDateText(dateText)) continue;
-    const category = i > 0 && RESEARCH_TAGS.has(leafTexts[i - 1]) ? leafTexts[i - 1] : undefined;
+    const _category = i > 0 && RESEARCH_TAGS.has(leafTexts[i - 1]) ? leafTexts[i - 1] : undefined;
 
     let title = "";
     let summary;

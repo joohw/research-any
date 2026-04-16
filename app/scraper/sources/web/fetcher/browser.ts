@@ -129,7 +129,7 @@ async function killStaleChromeProcesses(absUserDataDir: string): Promise<void> {
 // 注入脚本隐藏自动化特征
 async function stealthPage(page: Page): Promise<void> {
   await page.evaluateOnNewDocument(() => {
-    /* global navigator, window, document */
+    /* global navigator, window */
     Object.defineProperty(navigator, "webdriver", { get: () => false });
     Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
     Object.defineProperty(navigator, "languages", { get: () => ["zh-CN", "zh", "en"] });

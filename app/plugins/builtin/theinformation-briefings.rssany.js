@@ -1,11 +1,11 @@
 let _deps;
 
-// The Information — Briefings 列表页：https://www.theinformation.com/briefings
-// 结构：.content-feed .article.briefing.feed-item，标题 h3.title a，摘要 .briefing-dek，时间 .authors
+// The Information — AI Agenda 和 Briefings 列表页
+// 当前结构：.article.feed-item，标题 h3.title a，分类 .category-content a，作者 .authors，摘要 .recent-excerpt .long-excerpt
 
 const ORIGIN = "https://www.theinformation.com";
 const LIST_URL_RE =
-  /^https?:\/\/(www\.)?theinformation\.com\/briefings\/?(\?.*)?$/i;
+  /^https?:\/\/(www\.)?theinformation\.com\/(briefings|features\/[^/]+)\/?(\?.*)?$/i;
 
 
 function normalizeText(text) {
@@ -37,18 +37,19 @@ function pad2(n) {
 }
 
 
-/** .authors 文本：Apr 14, 2026 · 5:41am PDT（可含 · 1 comment）；Node 不能可靠解析 PDT 缩写，手动换算 offset */
-function parseBriefingAuthorsDate(raw) {
+/** .authors 文本：By Author · Apr 14, 2026 · 7:52am PDT */
+function parseAuthorsDate(raw) {
   let t = normalizeText(raw);
   t = t.replace(/\s*·\s*\d+\s+comments?\s*$/i, "").trim();
 
   const m = t.match(
-    /^(.+?\d{4})\s*·\s*(\d{1,2}:\d{2}\s*(?:am|pm))\s*(PDT|PST|PT)\s*$/i
+    /^By\s+(.+?)\s*·\s*(.+?\d{4})\s*·\s*(\d{1,2}:\d{2}\s*(?:am|pm))\s*(PDT|PST|PT)\s*$/i
   );
   if (m) {
-    const datePart = m[1].trim();
-    const timePart = m[2].trim();
-    const tz = m[3].toUpperCase();
+    const author = m[1].trim();
+    const datePart = m[2].trim();
+    const timePart = m[3].trim();
+    const tz = m[4].toUpperCase();
     const offset = tz === "PDT" ? "-07:00" : "-08:00";
 
     const hm = timePart.match(/(\d{1,2}):(\d{2})\s*(am|pm)/i);
@@ -63,23 +64,25 @@ function parseBriefingAuthorsDate(raw) {
       const mo = d0.getMonth() + 1;
       const da = d0.getDate();
       const iso = `${y}-${pad2(mo)}-${pad2(da)}T${pad2(h)}:${pad2(min)}:00${offset}`;
-      const out = new Date(iso);
-      if (!Number.isNaN(out.getTime())) return out;
+      const pubDate = new Date(iso);
+      if (!Number.isNaN(pubDate.getTime())) return { author, pubDate };
     }
   }
 
-  const first = t.split("·")[0].trim();
-  const fallback = new Date(first);
-  return Number.isNaN(fallback.getTime()) ? new Date() : fallback;
+  const authorMatch = t.match(/^By\s+(.+?)\s*·/i);
+  const author = authorMatch ? authorMatch[1].trim() : undefined;
+  const dateStr = t.replace(/^By\s+.*?\s*·\s*/, "").trim();
+  const pubDate = new Date(dateStr);
+  return { author, pubDate: Number.isNaN(pubDate.getTime()) ? new Date() : pubDate };
 }
 
 
-function parseBriefingItems(html, pageUrl) {
+function parseFeedItems(html, pageUrl) {
   const root = _deps.parseHtml(html);
   const items = [];
   const seen = new Set();
 
-  for (const node of root.querySelectorAll(".content-feed .article.briefing.feed-item")) {
+  for (const node of root.querySelectorAll(".article.feed-item")) {
     const linkEl = node.querySelector("h3.title a[href]");
     if (!linkEl) continue;
 
@@ -89,15 +92,26 @@ function parseBriefingItems(html, pageUrl) {
     seen.add(link);
 
     const authorsText = normalizeText(node.querySelector(".authors")?.textContent ?? "");
-    const pubDate = parseBriefingAuthorsDate(authorsText);
-    const summary = normalizeText(node.querySelector(".briefing-dek")?.textContent ?? "") || undefined;
+    const { author, pubDate } = parseAuthorsDate(authorsText);
+
+    const summary = normalizeText(
+      node.querySelector(".recent-excerpt .long-excerpt")?.textContent ??
+      node.querySelector(".recent-excerpt")?.textContent ??
+      node.querySelector(".short-excerpt")?.textContent ??
+      ""
+    ) || undefined;
+
+    const categoryEl = node.querySelector(".category-content a");
+    const category = categoryEl ? normalizeText(categoryEl.textContent) : undefined;
 
     items.push({
       guid: hashGuid(link),
       title,
       link,
       pubDate,
+      author,
       summary,
+      categories: category ? [category] : undefined,
     });
   }
 
@@ -109,17 +123,17 @@ async function fetchItems(sourceId, ctx) {
   _deps = ctx.deps;
   const { html, finalUrl, status } = await ctx.fetchHtml(sourceId, {
     waitMs: 5000,
-    waitForSelector: ".content-feed .article.briefing",
+    waitForSelector: ".article.feed-item",
     waitForSelectorTimeoutMs: 25_000,
   });
 
   const pageUrl = finalUrl || sourceId || ORIGIN;
-  const items = parseBriefingItems(html, pageUrl);
+  const items = parseFeedItems(html, pageUrl);
 
   if (items.length === 0) {
     const hint = status && status >= 400 ? ` HTTP ${status}` : "";
     throw new Error(
-      `[theinformation-briefings] 未解析到条目，页面结构可能已变化或需登录后抓取。${hint}`
+      `[theinformation] 未解析到条目，页面结构可能已变化或需登录后抓取。${hint}`
     );
   }
 
@@ -129,7 +143,7 @@ async function fetchItems(sourceId, ctx) {
 
 
 export default {
-  id: "theinformation-briefings",
+  id: "theinformation",
   listUrlPattern: LIST_URL_RE,
   refreshInterval: "1h",
   fetchItems,

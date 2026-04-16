@@ -266,7 +266,7 @@ function mapRowToFeedItem(row, origin) {
 
   const summary = normalizeText(row?.summary);
   const author = normalizeText(row?.source || row?.author);
-  const category = normalizeText(row?.theme?.title);
+  const _category = normalizeText(row?.theme?.title);
   const idText = String(row?.id ?? "").trim();
 
   return {

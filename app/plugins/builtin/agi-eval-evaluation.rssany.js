@@ -131,7 +131,7 @@ function buildSummary(record) {
   return clampText(detail);
 }
 
-function toFeedItem(record, origin, source) {
+function toFeedItem(record, origin, _source) {
   if (!record || typeof record !== "object") return null;
   const title = normalizeText(record.name);
   if (!title) return null;

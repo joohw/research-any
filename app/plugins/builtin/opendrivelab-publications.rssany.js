@@ -104,7 +104,7 @@ async function fetchItems(sourceId, ctx) {
     if (seen.has(link)) continue;
     seen.add(link);
 
-    const { summary, category, year } = extractContext(anchor);
+    const { summary, category: _category, year } = extractContext(anchor);
     const pubDate = year != null ? new Date(Date.UTC(year, 0, 1)) : new Date();
 
     items.push({

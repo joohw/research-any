@@ -14,6 +14,8 @@ import { queryItems, getPendingPushItems, markPushed, deleteItem, deleteItemsByS
 
 import { requireAdmin } from "../../../auth/middleware.js";
 
+import { canonicalHttpSourceRef } from "../../../utils/httpSourceRef.js";
+
 
 
 function parseSubscribedFlag(v: string | undefined): boolean {
@@ -197,10 +199,9 @@ export function registerItemsRoutes(app: Hono): void {
     }
 
 
-
     const result = await queryItems({
 
-      sourceUrl: effectiveSourceUrl ?? (sourceUrls ? undefined : ref),
+      sourceUrl: sourceUrls ? undefined : (effectiveSourceUrl ? canonicalHttpSourceRef(effectiveSourceUrl) : undefined),
 
       sourceUrls,
 

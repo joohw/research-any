@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 
 export function load({ params }) {
-  const sub = params.sub || 'all';
+  void params.sub;
   throw redirect(302, '/');
 }

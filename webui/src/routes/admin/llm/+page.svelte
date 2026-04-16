@@ -182,23 +182,14 @@
 
 <style>
   .feed-wrap {
+    margin-top: calc(-1 * var(--main-padding-top));
     width: 100%;
-    max-width: 100%;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: visible;
-    min-height: auto;
+    max-width: 42rem;
   }
   .feed-col {
-    display: flex;
-    flex-direction: column;
-    overflow: visible;
-    min-height: auto;
-    background: transparent;
+    padding: 0;
   }
   .body {
-    flex: 1;
     overflow: visible;
     padding: 1rem 0;
   }

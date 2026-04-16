@@ -31,11 +31,7 @@
 | --- | ------------------------------------------------------------ |
 | 运行时 | Node.js **20–23**（见 `package.json` `engines`）                |
 | 后端  | Hono、`tsx` 开发入口                                              |
-| 数据  | **SQLite**（`better-sqlite3`），默认 **`~/.rssany/data/rssany.db`**（Windows：`%USERPROFILE%\.rssany\data\rssany.db`） |
-| 前端  | `webui/`（SvelteKit + Vite，构建输出由根服务托管）                        |
-
-
-原生模块 `**better-sqlite3**` 安装时会编译；若遇绑定缺失，请确认未禁用构建（仓库 `pnpm-workspace.yaml` 中已允许其 `allowBuilds`）。
+| 数据  | **SQLite**（Node.js 内置 `node:sqlite`，Node.js 20+），默认 **`~/.rssany/data/rssany.db`**（Windows：`%USERPROFILE%\.rssany\data\rssany.db`） |
 
 ---
 

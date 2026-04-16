@@ -7,7 +7,7 @@
         ]
     },
     "deliver": {
-        "url": "",
+        "gateway": "",
         "token": ""
     },
     "llm": {

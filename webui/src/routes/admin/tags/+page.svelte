@@ -255,44 +255,22 @@
 {/if}
 
 <style>
-  /**
-   * 与信源列表等页一致：`main.main-fill` 不滚动，仅 `.feed-body-scroll` 内滚动，标题栏固定在上。
-   */
   .feed-wrap {
     margin-top: calc(-1 * var(--main-padding-top));
     width: 100%;
-    max-width: 100%;
+    max-width: 42rem;
     display: flex;
     flex-direction: column;
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
   }
 
   .feed-col {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-    background: transparent;
+    padding: 0;
   }
 
   .feed-toolbar-block {
     flex-shrink: 0;
     padding-top: var(--main-padding-top);
     padding-bottom: var(--feed-sticky-gap-after);
-  }
-
-  .feed-body-scroll {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
-    overflow-x: hidden;
-    overscroll-behavior-y: contain;
-    -webkit-overflow-scrolling: touch;
   }
 
   .body {

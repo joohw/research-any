@@ -16,7 +16,7 @@ import { chatJson, chatText } from "../core/llm.js";
 import type { PipelineContext } from "../pipeline/index.js";
 import { logger } from "../core/logger/index.js";
 import { getDeliverConfig } from "../config/deliver.js";
-import { postDeliverItemsSafe } from "../deliver/post.js";
+import { joinGatewayPath, postDeliverItemsSafe } from "../deliver/post.js";
 import { getEffectiveProxyForListUrl } from "../scraper/subscription/index.js";
 import { canonicalHttpSourceRef } from "../utils/httpSourceRef.js";
 
@@ -100,7 +100,7 @@ async function generateAndCache(
   generatingKeys.delete(key);
   logger.info("scraper", "抓取成功", { source_url: listUrl, count: items.length });
 
-  const { url: deliverUrl, token: deliverToken } = await getDeliverConfig();
+  const { gateway: deliverGateway, token: deliverToken } = await getDeliverConfig();
 
   let newCount = 0;
   let newIds = new Set<string>();
@@ -133,8 +133,8 @@ async function generateAndCache(
     emitFeedUpdated({ sourceUrl: sourceRefStored, newCount: newCount - pipelineDroppedNew });
   }
   const out = items.filter((i) => !isPipelineDroppedItem(i));
-  if (deliverUrl && out.length > 0) {
-    await postDeliverItemsSafe(deliverUrl, sourceRefStored, out, {
+  if (deliverGateway.trim() && out.length > 0) {
+    await postDeliverItemsSafe(joinGatewayPath(deliverGateway, "items"), sourceRefStored, out, {
       bearerToken: deliverToken || undefined,
     });
   }

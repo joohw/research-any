@@ -12,7 +12,7 @@
 | 包管理 | **pnpm**（根目录与 `webui/` 分别安装依赖） |
 | 语言 | TypeScript（以 `tsconfig.json` / ESLint 为准） |
 | HTTP | Hono + `@hono/node-server` |
-| 数据库 | **SQLite**（`better-sqlite3`），默认路径 `~/.rssany/data/rssany.db`（或 `RSSANY_USER_DIR`） |
+| 数据库 | **SQLite**（Node.js 内置 `node:sqlite`），默认路径 `~/.rssany/data/rssany.db`（或 `RSSANY_USER_DIR`） |
 | 浏览器自动化 | `puppeteer-core` |
 | HTML / 正文 | `node-html-parser`、jsdom、`@mozilla/readability` |
 | LLM（可选） | `openai`（兼容 OpenAI 式 HTTP API） |

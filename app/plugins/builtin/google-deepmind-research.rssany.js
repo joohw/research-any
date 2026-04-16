@@ -4,7 +4,7 @@ let _deps;
 
 
 
-const DEEPMIND_RESEARCH_URL = "https://deepmind.google/research/";
+const _DEEPMIND_RESEARCH_URL = "https://deepmind.google/research/";
 const DEEPMIND_ORIGIN = "https://deepmind.google";
 const MONTH_TO_INDEX = {
   january: 0,

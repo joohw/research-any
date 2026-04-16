@@ -140,7 +140,7 @@ function parseOneEntry(liNode, currentYear, pageUrl) {
   const fallbackYear = parseYear(`${periodical} ${detailNode.textContent}`);
   const finalYear = currentYear ?? fallbackYear;
   const pubDate = finalYear != null ? new Date(Date.UTC(finalYear, 0, 1, 0, 0, 0)) : new Date();
-  const badge = normalizeText((liNode.querySelector(".abbr .badge") ?? liNode.querySelector("abbr"))?.textContent) || undefined;
+  const _badge = normalizeText((liNode.querySelector(".abbr .badge") ?? liNode.querySelector("abbr"))?.textContent) || undefined;
   const link = pickBestLink(detailNode, pageUrl, entryId);
   const guidSeed = entryId || link || `${title}|${author ?? ""}|${finalYear ?? ""}`;
 

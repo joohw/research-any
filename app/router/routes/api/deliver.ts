@@ -1,56 +1,98 @@
-// /api/deliver、/api/deliver/test — 配置投递 URL；非空则在正常写库后额外 POST 条目到该地址
+// /api/deliver、/api/deliver/test — Gateway 基址；固定 POST {gateway}/items、{gateway}/sources，测试 POST {gateway}/test
 
 import type { Hono } from "hono";
+import type { FeedItem } from "../../../types/feedItem.js";
 import { requireAdmin } from "../../../auth/middleware.js";
 import { getDeliverConfig, saveDeliverConfig } from "../../../config/deliver.js";
-import { postDeliverItems } from "../../../deliver/post.js";
+import { getSourcesRaw } from "../../../scraper/subscription/index.js";
+import { feedItemsToPayload, postDeliverGatewayTest } from "../../../deliver/post.js";
 
 export function registerDeliverRoutes(app: Hono): void {
   app.get("/api/deliver", requireAdmin(), async (c) => {
-    const { url, token } = await getDeliverConfig();
-    return c.json({ url, token });
+    const { gateway, token } = await getDeliverConfig();
+    return c.json({ gateway, token });
   });
 
   app.put("/api/deliver", requireAdmin(), async (c) => {
     try {
-      const body = await c.req.json<{ url?: string; token?: string }>();
-      const url = typeof body?.url === "string" ? body.url.trim() : "";
-      const token = typeof body?.token === "string" ? body.token.trim() : "";
-      await saveDeliverConfig({ url, token });
-      return c.json({ ok: true, url, token });
+      const body = await c.req.json<{
+        gateway?: string;
+        token?: string;
+        /** 旧版：完整 …/items URL，将迁移为 gateway 基址 */
+        url?: string;
+      }>();
+      const prev = await getDeliverConfig();
+      const explicitGateway = body != null && "gateway" in body;
+      const explicitUrl = body != null && "url" in body;
+      const explicitToken = body != null && "token" in body;
+      let gateway = typeof body?.gateway === "string" ? body.gateway.trim() : "";
+      if (!gateway && typeof body?.url === "string") {
+        gateway = body.url
+          .trim()
+          .replace(/\/items\/?$/i, "")
+          .replace(/\/+$/, "");
+      }
+      if (!explicitGateway && !explicitUrl) {
+        gateway = prev.gateway;
+      }
+      let token = typeof body?.token === "string" ? body.token.trim() : "";
+      if (!explicitToken) {
+        token = prev.token;
+      }
+      await saveDeliverConfig({ gateway, token });
+      return c.json({ ok: true, gateway, token });
     } catch (err) {
       return c.json({ ok: false, message: err instanceof Error ? err.message : String(err) }, 400);
     }
   });
 
+  /** 合并测试：仅 POST 到 {gateway}/test，体含示例 items 批次与当前 sources 文档 */
   app.post("/api/deliver/test", requireAdmin(), async (c) => {
     try {
-      const body = await c.req.json<{ url?: string; token?: string }>();
-      const url = typeof body?.url === "string" ? body.url.trim() : "";
-      const token = typeof body?.token === "string" ? body.token.trim() : "";
-      if (!url) return c.json({ ok: false, message: "url 不能为空" }, 400);
-      const sample = {
-        guid: "deliver-test-" + Date.now(),
+      const body = await c.req.json<{
+        gateway?: string;
+        token?: string;
+        url?: string;
+      }>();
+      const prev = await getDeliverConfig();
+      let gateway = typeof body?.gateway === "string" ? body.gateway.trim() : "";
+      if (!gateway && typeof body?.url === "string") {
+        gateway = body.url
+          .trim()
+          .replace(/\/items\/?$/i, "")
+          .replace(/\/+$/, "");
+      }
+      if (!gateway) gateway = prev.gateway;
+      const token =
+        typeof body?.token === "string" ? body.token.trim() : prev.token;
+      if (!gateway.trim()) return c.json({ ok: false, message: "gateway 不能为空" }, 400);
+
+      const now = Date.now();
+      const sample: FeedItem = {
+        guid: "deliver-test-" + now,
         title: "投递连通性测试",
         link: "https://example.com/rssany-deliver-test",
-        pubDate: new Date().toISOString(),
-        summary: "若下游收到此条，说明投递 URL 可用。",
+        pubDate: new Date(),
+        summary: "若下游 /test 收到此条，说明 Gateway 可用。",
+        sourceRef: "rssany-deliver-test",
       };
-      await postDeliverItems(
-        url,
-        "rssany-deliver-test",
-        [
-          {
-            guid: sample.guid,
-            title: sample.title,
-            link: sample.link,
-            pubDate: new Date(sample.pubDate),
-            summary: sample.summary,
-            sourceRef: "rssany-deliver-test",
-          },
-        ],
-        { bearerToken: token || undefined },
-      );
+      const raw = await getSourcesRaw();
+      let sourcesDoc: unknown;
+      try {
+        sourcesDoc = JSON.parse(raw) as unknown;
+      } catch {
+        sourcesDoc = { sources: [] };
+      }
+
+      const payload = {
+        rssanyConnectivityTest: true,
+        items: {
+          sourceRef: "rssany-deliver-test",
+          items: feedItemsToPayload([sample]),
+        },
+        sources: sourcesDoc,
+      };
+      await postDeliverGatewayTest(gateway.trim(), payload, { bearerToken: token || undefined });
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ ok: false, message: err instanceof Error ? err.message : String(err) }, 400);

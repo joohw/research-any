@@ -99,7 +99,12 @@
   }
 
   $effect(() => {
-    if (open && sourceRef.trim()) {
+    if (open && sourceRef) {
+      const ref = sourceRef.trim();
+      if (!ref) {
+        items = [];
+        return;
+      }
       // loadItems 会同步读写 loadSeq/loading；若在 effect 追踪内执行，会把它们当成依赖并无限重跑（effect_update_depth_exceeded）。
       untrack(() => void loadItems());
     } else if (!open) {

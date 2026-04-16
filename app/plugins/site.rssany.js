@@ -7,6 +7,7 @@
 
 export default {
   id: "__PLUGIN_ID__",
+  // eslint-disable-next-line no-undef
   listUrlPattern: __LIST_URL_PATTERN__,
   refreshInterval: "1day",
 

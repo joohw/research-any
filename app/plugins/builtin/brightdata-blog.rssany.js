@@ -160,7 +160,7 @@ async function fetchFeedItems(feedUrl) {
       .map((node) => normalizeText(node.textContent))
       .filter(Boolean);
     const fallbackCategory = extractCategoryFromLink(link);
-    const finalCategories = categories.length > 0
+    const _finalCategories = categories.length > 0
       ? uniqueTexts(categories)
       : (fallbackCategory ? [fallbackCategory] : undefined);
 

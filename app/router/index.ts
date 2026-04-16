@@ -15,6 +15,7 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerRssRoutes } from "./routes/rss.js";
 import { registerWebUiRoutes } from "./webui.js";
+import { getAppVersion } from "../version.js";
 
 const PORT = Number(process.env.PORT) || 18473;
 const IS_DEV = process.env.NODE_ENV === "development" || process.argv.includes("--watch");
@@ -71,7 +72,9 @@ async function main(): Promise<void> {
   const app = createApp();
   const server = serve({ fetch: app.fetch, port: PORT, hostname: "0.0.0.0" });
   server.setMaxListeners(32);
-  console.log(`服务已启动 http://127.0.0.1:${PORT}/（API + 静态前端，需先 pnpm run webui:build）`);
+  console.log(
+    `RssAny ${getAppVersion()} 服务已启动 http://127.0.0.1:${PORT}/（API + 静态前端，需先 pnpm run webui:build）`,
+  );
   const lanIp = Object.values(networkInterfaces()).flat().find((iface) => iface?.family === "IPv4" && !iface.internal)?.address;
   if (lanIp) console.log(`局域网访问 http://${lanIp}:${PORT}/`);
   if (IS_DEV) {
